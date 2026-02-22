@@ -429,7 +429,7 @@ export type SSEEventType =
 
 export interface SSEEvent {
   type: SSEEventType;
-  payload: Task | TaskActivity | TaskDeliverable | {
+  payload: Task | TaskActivity | TaskDeliverable | WorkflowRun | Approval | Alert | Notification | {
     taskId: string;
     sessionId: string;
     agentName?: string;

@@ -450,6 +450,57 @@ export class OpenClawClient extends EventEmitter {
     return this.call<OpenClawSessionInfo>('sessions.create', { channel, peer });
   }
 
+  // Workflow execution methods
+
+  /**
+   * Spawn a sub-agent session to execute a workflow step.
+   * Returns the spawned session info including sessionKey.
+   */
+  async spawnSession(params: {
+    task: string;
+    label?: string;
+    agentId?: string;
+    model?: string;
+    runTimeoutSeconds?: number;
+    timeoutSeconds?: number;
+    cleanup?: 'delete' | 'keep';
+  }): Promise<{ sessionKey: string; [key: string]: unknown }> {
+    return this.call<{ sessionKey: string; [key: string]: unknown }>('sessions.spawn', params);
+  }
+
+  /**
+   * Send a message to an existing session (e.g., approval/rejection to a waiting step).
+   */
+  async sendToSession(params: {
+    sessionKey?: string;
+    label?: string;
+    message: string;
+    timeoutSeconds?: number;
+  }): Promise<unknown> {
+    return this.call('sessions.send', params);
+  }
+
+  /**
+   * List sub-agent sessions, optionally filtering by recent activity.
+   */
+  async listSubagents(params?: { recentMinutes?: number }): Promise<unknown[]> {
+    return this.call<unknown[]>('subagents.list', params);
+  }
+
+  /**
+   * Kill a running sub-agent session.
+   */
+  async killSubagent(target: string): Promise<void> {
+    await this.call('subagents.kill', { target });
+  }
+
+  /**
+   * Get session history for a sub-agent.
+   */
+  async getSubagentHistory(sessionKey: string, params?: { limit?: number; includeTools?: boolean }): Promise<unknown[]> {
+    return this.call<unknown[]>('sessions.history', { sessionKey, ...params });
+  }
+
   // Agent methods
   async listAgents(): Promise<unknown[]> {
     const result = await this.call<{ agents?: unknown[] }>('agents.list');

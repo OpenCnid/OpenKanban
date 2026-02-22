@@ -4,6 +4,7 @@ import { queryOne, run, queryAll } from '@/lib/db';
 import { broadcast } from '@/lib/events';
 import { getMissionControlUrl } from '@/lib/config';
 import { UpdateTaskSchema } from '@/lib/validation';
+import { onStepCompleted, onStepReview } from '@/lib/workflow-engine';
 import type { Task, UpdateTaskRequest, Agent, TaskDeliverable } from '@/lib/types';
 
 // GET /api/tasks/[id] - Get a single task
@@ -171,6 +172,19 @@ export async function PATCH(
         type: 'task_updated',
         payload: task,
       });
+    }
+
+    // Workflow engine: advance pipeline when a workflow task changes status
+    if (task && task.workflow_run_id && validatedData.status) {
+      if (validatedData.status === 'done' && existing.status !== 'done') {
+        // Step completed — trigger next step asynchronously
+        onStepCompleted(task.id).catch(err => {
+          console.error('[WorkflowEngine] Error advancing pipeline after step completion:', err);
+        });
+      } else if (validatedData.status === 'review' && existing.status !== 'review') {
+        // Step moved to review — pause pipeline for human approval
+        onStepReview(task.id);
+      }
     }
 
     // Trigger auto-dispatch if needed
