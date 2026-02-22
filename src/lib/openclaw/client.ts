@@ -531,6 +531,57 @@ export class OpenClawClient extends EventEmitter {
     return this.invokeToolHttp<unknown[]>('sessions_history', { sessionKey, ...params });
   }
 
+  // --- Cron / Schedule Methods ---
+
+  /**
+   * Add a cron job to OpenClaw for scheduled pipeline triggers.
+   */
+  async addCronJob(params: {
+    name?: string;
+    schedule: { kind: 'cron'; expr: string; tz?: string } | { kind: 'every'; everyMs: number } | { kind: 'at'; at: string };
+    payload: { kind: 'agentTurn'; message: string; model?: string; timeoutSeconds?: number };
+    sessionTarget?: 'main' | 'isolated';
+    delivery?: { mode: 'none' | 'announce' | 'webhook'; to?: string };
+    enabled?: boolean;
+  }): Promise<{ jobId: string; [key: string]: unknown }> {
+    return this.invokeToolHttp<{ jobId: string; [key: string]: unknown }>('cron', {
+      action: 'add',
+      job: {
+        name: params.name,
+        schedule: params.schedule,
+        payload: params.payload,
+        sessionTarget: params.sessionTarget || 'isolated',
+        delivery: params.delivery || { mode: 'none' },
+        enabled: params.enabled ?? true,
+      },
+    });
+  }
+
+  /**
+   * Remove a cron job.
+   */
+  async removeCronJob(jobId: string): Promise<void> {
+    await this.invokeToolHttp('cron', { action: 'remove', jobId });
+  }
+
+  /**
+   * List cron jobs.
+   */
+  async listCronJobs(includeDisabled?: boolean): Promise<unknown[]> {
+    const result = await this.invokeToolHttp<{ jobs?: unknown[] }>('cron', {
+      action: 'list',
+      includeDisabled: includeDisabled ?? false,
+    });
+    return (result as Record<string, unknown>)?.jobs as unknown[] || [];
+  }
+
+  /**
+   * Update a cron job (enable/disable, change schedule, etc.).
+   */
+  async updateCronJob(jobId: string, patch: Record<string, unknown>): Promise<void> {
+    await this.invokeToolHttp('cron', { action: 'update', jobId, patch });
+  }
+
   // Agent methods
   async listAgents(): Promise<unknown[]> {
     const result = await this.call<{ agents?: unknown[] }>('agents_list');
