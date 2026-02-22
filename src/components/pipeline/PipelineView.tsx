@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { GitBranch, Plus } from 'lucide-react';
 import { PipelineCard, type PipelineRunData } from './PipelineCard';
 import { PipelineFilters, type PipelineFilter } from './PipelineFilters';
 import { WorkflowTemplatePicker } from './WorkflowTemplatePicker';
 import { useMissionControl } from '@/lib/store';
-import type { StepState } from './PipelineStepChain';
-import type { Task, TaskStatus } from '@/lib/types';
+import type { StepState, PipelineStep } from './PipelineStepChain';
+import type { StepDetailData } from './PipelineStepDetail';
+import type { Task, TaskStatus, WorkflowRun } from '@/lib/types';
 
 interface PipelineViewProps {
   workspaceId: string;
@@ -27,19 +28,11 @@ function taskStatusToStepState(status: TaskStatus): StepState {
   }
 }
 
-// Check if a task has a failure (via metadata or special status patterns)
-function isTaskFailed(task: Task): boolean {
-  // Tasks don't have a 'failed' status in the schema, but
-  // if the run is failed, individual tasks may still be in progress/inbox
-  // We mark them as failed if the run is failed and they aren't done
-  return false;
-}
-
 export function PipelineView({ workspaceId }: PipelineViewProps) {
   const [filter, setFilter] = useState<PipelineFilter>('all');
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
-  const { workflowRuns, tasks, setWorkflowRuns, addWorkflowRun } = useMissionControl();
+  const { workflowRuns, tasks, setWorkflowRuns } = useMissionControl();
 
   // Build PipelineRunData from real workflow runs + their tasks
   const pipelineRuns = useMemo((): PipelineRunData[] => {
@@ -49,11 +42,27 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         .filter((t) => t.workflow_run_id === run.id)
         .sort((a, b) => (a.workflow_step_index ?? 0) - (b.workflow_step_index ?? 0));
 
-      const steps = runTasks.map((t) => ({
+      const steps: PipelineStep[] = runTasks.map((t) => ({
         name: t.title,
         state: run.status === 'failed' && t.status !== 'done'
           ? 'failed' as StepState
           : taskStatusToStepState(t.status),
+        taskId: t.id,
+      }));
+
+      // Build step details for expandable view
+      const stepDetails: StepDetailData[] = runTasks.map((t, i) => ({
+        taskId: t.id,
+        name: t.title,
+        state: run.status === 'failed' && t.status !== 'done'
+          ? 'failed' as StepState
+          : taskStatusToStepState(t.status),
+        stepIndex: i,
+        totalSteps: runTasks.length,
+        description: t.description || undefined,
+        deliverables: [], // TODO: fetch from task_deliverables
+        inputArtifacts: [], // TODO: fetch from task_deliverables where is_input=1
+        runId: run.id,
       }));
 
       // Map workflow run status to pipeline card status
@@ -63,7 +72,7 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         case 'failed': cardStatus = 'failed'; break;
         case 'paused': cardStatus = 'paused'; break;
         case 'pending': cardStatus = 'pending'; break;
-        case 'cancelled': cardStatus = 'failed'; break;
+        case 'cancelled': cardStatus = 'cancelled'; break;
         default: cardStatus = 'running';
       }
 
@@ -88,6 +97,7 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         status: cardStatus,
         triggerInput: triggerInput || undefined,
         steps,
+        stepDetails,
         startedAt: run.started_at,
         completedAt: run.completed_at,
       };
@@ -96,14 +106,17 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
 
   const filteredRuns = useMemo(() => {
     if (filter === 'all') return pipelineRuns;
-    return pipelineRuns.filter((r) => r.status === filter);
+    return pipelineRuns.filter((r) => {
+      if (filter === 'running') return r.status === 'running' || r.status === 'paused';
+      return r.status === filter;
+    });
   }, [pipelineRuns, filter]);
 
   const counts = useMemo(() => ({
     all: pipelineRuns.length,
     running: pipelineRuns.filter((r) => r.status === 'running' || r.status === 'paused').length,
     completed: pipelineRuns.filter((r) => r.status === 'completed').length,
-    failed: pipelineRuns.filter((r) => r.status === 'failed').length,
+    failed: pipelineRuns.filter((r) => r.status === 'failed' || r.status === 'cancelled').length,
   }), [pipelineRuns]);
 
   const handleTriggerRun = useCallback(async (templateId: string, triggerInput: string) => {
@@ -118,10 +131,6 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         console.error('Failed to trigger run:', await res.text());
         return;
       }
-
-      // The SSE event will add the run to the store, but also fetch to make sure
-      // tasks are loaded (they may not come through SSE as fast)
-      const data = await res.json();
 
       // Re-fetch runs + tasks to get fresh data
       const [runsRes, tasksRes] = await Promise.all([
@@ -140,6 +149,80 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
       }
     } catch (error) {
       console.error('Failed to trigger workflow run:', error);
+    }
+  }, [workspaceId, setWorkflowRuns]);
+
+  const handleApproveStep = useCallback(async (runId: string, taskId: string) => {
+    try {
+      const res = await fetch(`/api/workflows/runs/${runId}/steps/${taskId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) {
+        console.error('Failed to approve step:', await res.text());
+        return;
+      }
+
+      // Re-fetch to get updated state
+      const [runsRes, tasksRes] = await Promise.all([
+        fetch(`/api/workflows/runs?workspace_id=${workspaceId}`),
+        fetch(`/api/tasks?workspace_id=${workspaceId}`),
+      ]);
+
+      if (runsRes.ok) setWorkflowRuns(await runsRes.json());
+      if (tasksRes.ok) useMissionControl.getState().setTasks(await tasksRes.json());
+    } catch (error) {
+      console.error('Failed to approve step:', error);
+    }
+  }, [workspaceId, setWorkflowRuns]);
+
+  const handleRejectStep = useCallback(async (runId: string, taskId: string) => {
+    try {
+      const res = await fetch(`/api/workflows/runs/${runId}/steps/${taskId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) {
+        console.error('Failed to reject step:', await res.text());
+        return;
+      }
+
+      const [runsRes, tasksRes] = await Promise.all([
+        fetch(`/api/workflows/runs?workspace_id=${workspaceId}`),
+        fetch(`/api/tasks?workspace_id=${workspaceId}`),
+      ]);
+
+      if (runsRes.ok) setWorkflowRuns(await runsRes.json());
+      if (tasksRes.ok) useMissionControl.getState().setTasks(await tasksRes.json());
+    } catch (error) {
+      console.error('Failed to reject step:', error);
+    }
+  }, [workspaceId, setWorkflowRuns]);
+
+  const handleCancelRun = useCallback(async (runId: string) => {
+    try {
+      const res = await fetch(`/api/workflows/runs/${runId}/cancel`, {
+        method: 'POST',
+      });
+
+      if (!res.ok) {
+        console.error('Failed to cancel run:', await res.text());
+        return;
+      }
+
+      const [runsRes, tasksRes] = await Promise.all([
+        fetch(`/api/workflows/runs?workspace_id=${workspaceId}`),
+        fetch(`/api/tasks?workspace_id=${workspaceId}`),
+      ]);
+
+      if (runsRes.ok) setWorkflowRuns(await runsRes.json());
+      if (tasksRes.ok) useMissionControl.getState().setTasks(await tasksRes.json());
+    } catch (error) {
+      console.error('Failed to cancel run:', error);
     }
   }, [workspaceId, setWorkflowRuns]);
 
@@ -181,7 +264,13 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
           </div>
         ) : (
           filteredRuns.map((run) => (
-            <PipelineCard key={run.id} run={run} />
+            <PipelineCard
+              key={run.id}
+              run={run}
+              onApproveStep={handleApproveStep}
+              onRejectStep={handleRejectStep}
+              onCancelRun={handleCancelRun}
+            />
           ))
         )}
       </div>

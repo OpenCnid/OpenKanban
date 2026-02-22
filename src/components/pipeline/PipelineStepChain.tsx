@@ -5,10 +5,13 @@ export type StepState = 'complete' | 'running' | 'waiting' | 'pending' | 'review
 export interface PipelineStep {
   name: string;
   state: StepState;
+  taskId?: string;
 }
 
 interface PipelineStepChainProps {
   steps: PipelineStep[];
+  selectedStepIndex?: number | null;
+  onStepClick?: (index: number) => void;
 }
 
 const stateConfig: Record<StepState, { icon: string; bg: string; text: string; pulse?: boolean }> = {
@@ -20,11 +23,14 @@ const stateConfig: Record<StepState, { icon: string; bg: string; text: string; p
   failed: { icon: '❌', bg: 'bg-red-500/20 border-red-500/40', text: 'text-red-400' },
 };
 
-export function PipelineStepChain({ steps }: PipelineStepChainProps) {
+export function PipelineStepChain({ steps, selectedStepIndex, onStepClick }: PipelineStepChainProps) {
   return (
     <div className="flex items-center gap-1 overflow-x-auto">
       {steps.map((step, i) => {
         const config = stateConfig[step.state];
+        const isSelected = selectedStepIndex === i;
+        const isClickable = !!onStepClick;
+
         return (
           <div key={i} className="flex items-center gap-1 flex-shrink-0">
             {i > 0 && (
@@ -34,15 +40,20 @@ export function PipelineStepChain({ steps }: PipelineStepChainProps) {
                   : 'bg-mc-border/30'
               }`} />
             )}
-            <div
+            <button
+              type="button"
+              onClick={() => onStepClick?.(i)}
+              disabled={!isClickable}
               className={`flex items-center gap-1.5 px-2 py-1 rounded border text-xs ${config.bg} ${config.text} ${
                 config.pulse ? 'animate-pulse' : ''
+              } ${isSelected ? 'ring-1 ring-mc-accent ring-offset-1 ring-offset-mc-bg-secondary' : ''} ${
+                isClickable ? 'cursor-pointer hover:brightness-110' : ''
               }`}
               title={`${step.name} — ${step.state}`}
             >
               <span className="text-xs">{config.icon}</span>
               <span className="truncate max-w-[100px]">{step.name}</span>
-            </div>
+            </button>
           </div>
         );
       })}
