@@ -256,7 +256,7 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
       const result = await client.spawnSession({
         task: prompt,
         label,
-        cleanup: 'keep', // Keep session for history/artifact extraction
+        cleanup: 'delete', // Clean up session after step completes
         runTimeoutSeconds: 300, // 5 min timeout per step
       });
 
