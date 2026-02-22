@@ -1,36 +1,43 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronRight, ChevronLeft, Loader2, Bot, Clock, CheckCircle, XCircle } from 'lucide-react';
+import {
+  ChevronRight, ChevronLeft, Loader2, Bot, Clock,
+  CheckCircle, XCircle, Globe, Search, Code, Brain, FileText, Zap,
+} from 'lucide-react';
 
-interface SubAgent {
-  sessionKey?: string;
-  label?: string;
-  status?: string;
-  task?: string;
-  model?: string;
-  runtime?: string;
-  runtimeMs?: number;
-  startedAt?: number;
-  endedAt?: number;
+interface AgentActivity {
+  sessionKey: string;
+  label: string;
+  status: string;
+  stepName: string;
+  pipelineName: string;
+  model: string;
+  runtime: string;
+  runtimeMs: number;
   totalTokens?: number;
+  currentActivity?: string;
+  activityType?: string;
+  activityDetail?: string;
 }
 
-interface LiveAgentsSidebarProps {
-  workspaceId?: string;
+interface AgentData {
+  active: AgentActivity[];
+  recent: AgentActivity[];
+  totalActive: number;
 }
 
-export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
-  const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
+export function LiveAgentsSidebar() {
+  const [data, setData] = useState<AgentData>({ active: [], recent: [], totalActive: 0 });
   const [isMinimized, setIsMinimized] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
 
-  const loadSubAgents = useCallback(async () => {
+  const loadAgents = useCallback(async () => {
     try {
-      const res = await fetch('/api/openclaw/sessions');
+      const res = await fetch('/api/openclaw/agents');
       if (res.ok) {
-        const data = await res.json();
-        setSubAgents(Array.isArray(data) ? data : []);
+        setData(await res.json());
       }
     } catch {
       // Silent
@@ -40,69 +47,34 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
   }, []);
 
   useEffect(() => {
-    loadSubAgents();
-    const interval = setInterval(loadSubAgents, 8000);
+    loadAgents();
+    // Poll faster when agents are active
+    const interval = setInterval(loadAgents, data.totalActive > 0 ? 5000 : 15000);
     return () => clearInterval(interval);
-  }, [loadSubAgents]);
+  }, [loadAgents, data.totalActive]);
 
   // SSE-driven refresh
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (!detail) return;
-      const type = detail.type || '';
-      if (type.includes('task') || type.includes('workflow') || type.includes('session')) {
-        loadSubAgents();
-      }
-    };
+    const handler = () => loadAgents();
     window.addEventListener('sse-event', handler);
     return () => window.removeEventListener('sse-event', handler);
-  }, [loadSubAgents]);
+  }, [loadAgents]);
 
-  const activeAgents = subAgents.filter(a => a.status === 'running' || a.status === 'active');
-  const recentAgents = subAgents.filter(a => a.status === 'done' || a.status === 'completed').slice(0, 5);
-
-  const getStatusIcon = (agent: SubAgent) => {
-    if (agent.status === 'done' || agent.status === 'completed') return <CheckCircle className="w-3 h-3 text-green-400" />;
-    if (agent.status === 'failed' || agent.status === 'error') return <XCircle className="w-3 h-3 text-red-400" />;
-    return <Loader2 className="w-3 h-3 text-teal-400 animate-spin" />;
-  };
-
-  const getTaskSummary = (agent: SubAgent): string => {
-    // Extract the step name from the task prompt
-    if (agent.task) {
-      // Tasks start with "## Workflow Step: Market Data Pull\n**Pipeline:**..."
-      const stepMatch = agent.task.match(/Workflow Step:\s*([^\n*]+)/);
-      if (stepMatch) return stepMatch[1].trim();
-
-      // Fallback: first meaningful line
-      const firstLine = agent.task.split('\n')[0].replace(/^#+\s*/, '').trim();
-      if (firstLine.length > 3) return firstLine.length > 50 ? firstLine.slice(0, 47) + '...' : firstLine;
+  const activityIcon = (type?: string) => {
+    switch (type) {
+      case 'browsing': return <Globe className="w-3 h-3 text-blue-400" />;
+      case 'searching': return <Search className="w-3 h-3 text-amber-400" />;
+      case 'coding': return <Code className="w-3 h-3 text-green-400" />;
+      case 'writing': return <FileText className="w-3 h-3 text-purple-400" />;
+      case 'analyzing': return <Brain className="w-3 h-3 text-teal-400" />;
+      default: return <Zap className="w-3 h-3 text-mc-text-secondary" />;
     }
-
-    // Parse label: wf-abc123-step0 → "Step 1"
-    if (agent.label) {
-      const stepMatch = agent.label.match(/step(\d+)$/);
-      if (stepMatch) return `Step ${parseInt(stepMatch[1]) + 1}`;
-      if (agent.label.includes('chat')) return 'Chat';
-      return agent.label;
-    }
-    return 'Working...';
-  };
-
-  const getModelShort = (agent: SubAgent): string => {
-    if (!agent.model) return '';
-    const parts = agent.model.split('/');
-    const name = parts[parts.length - 1];
-    if (name.includes('sonnet')) return 'sonnet';
-    if (name.includes('opus')) return 'opus';
-    return name;
   };
 
   return (
     <aside
       className={`bg-mc-bg-secondary border-r border-mc-border flex flex-col transition-all duration-300 ease-in-out ${
-        isMinimized ? 'w-12' : 'w-64'
+        isMinimized ? 'w-12' : 'w-72'
       }`}
     >
       {/* Header */}
@@ -117,9 +89,9 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
           {!isMinimized && (
             <>
               <span className="text-sm font-medium uppercase tracking-wider">Agents</span>
-              {activeAgents.length > 0 && (
-                <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold bg-teal-500/20 text-teal-400 rounded-full leading-none">
-                  {activeAgents.length}
+              {data.totalActive > 0 && (
+                <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold bg-teal-500/20 text-teal-400 rounded-full leading-none animate-pulse">
+                  {data.totalActive} active
                 </span>
               )}
             </>
@@ -129,40 +101,67 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
 
       {isMinimized ? (
         <div className="flex-1 flex flex-col items-center pt-3 gap-2">
-          {activeAgents.map((agent, i) => (
-            <div key={i} className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse" title={getTaskSummary(agent)} />
+          {data.active.map((a, i) => (
+            <div key={i} className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse" title={a.stepName} />
           ))}
-          {activeAgents.length === 0 && (
-            <div className="w-2.5 h-2.5 rounded-full bg-mc-text-secondary/20" title="No active agents" />
+          {data.active.length === 0 && (
+            <div className="w-2.5 h-2.5 rounded-full bg-mc-text-secondary/20" />
           )}
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto">
           {/* Active agents */}
-          {activeAgents.length > 0 ? (
-            <div className="p-3">
-              <p className="text-[10px] uppercase text-mc-text-secondary/50 font-medium mb-2 tracking-wider">Working</p>
-              <div className="space-y-2">
-                {activeAgents.map((agent, i) => (
-                  <div key={i} className="p-2.5 bg-mc-bg-tertiary/50 border border-mc-border/30 rounded-lg">
-                    <div className="flex items-start gap-2">
-                      {getStatusIcon(agent)}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-mc-text leading-snug font-medium">{getTaskSummary(agent)}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="flex items-center gap-0.5 text-[10px] text-mc-text-secondary/50">
-                            <Clock className="w-2.5 h-2.5" />
-                            {agent.runtime || '...'}
-                          </span>
-                          {agent.model && (
-                            <span className="text-[10px] text-mc-text-secondary/40">{getModelShort(agent)}</span>
-                          )}
-                        </div>
+          {data.active.length > 0 ? (
+            <div className="p-3 space-y-2">
+              {data.active.map((agent) => (
+                <div
+                  key={agent.sessionKey}
+                  className="bg-mc-bg-tertiary/50 border border-teal-500/20 rounded-lg overflow-hidden cursor-pointer"
+                  onClick={() => setExpandedAgent(expandedAgent === agent.sessionKey ? null : agent.sessionKey)}
+                >
+                  {/* Compact view */}
+                  <div className="p-2.5">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Loader2 className="w-3 h-3 text-teal-400 animate-spin flex-shrink-0" />
+                      <span className="text-xs font-medium text-mc-text truncate">{agent.stepName}</span>
+                    </div>
+                    <div className="text-[10px] text-mc-text-secondary/60 mb-1.5 truncate">
+                      {agent.pipelineName}
+                    </div>
+
+                    {/* Current activity — the key feature */}
+                    {agent.currentActivity && (
+                      <div className="flex items-start gap-1.5 bg-mc-bg/50 rounded px-2 py-1.5 mb-1.5">
+                        {activityIcon(agent.activityType)}
+                        <span className="text-[11px] text-mc-text leading-snug line-clamp-2">
+                          {agent.currentActivity}
+                        </span>
                       </div>
+                    )}
+
+                    <div className="flex items-center gap-3 text-[10px] text-mc-text-secondary/40">
+                      <span className="flex items-center gap-0.5">
+                        <Clock className="w-2.5 h-2.5" /> {agent.runtime}
+                      </span>
+                      <span>{agent.model}</span>
                     </div>
                   </div>
-                ))}
-              </div>
+
+                  {/* Expanded detail */}
+                  {expandedAgent === agent.sessionKey && (
+                    <div className="border-t border-mc-border/20 px-2.5 py-2 bg-mc-bg/30 space-y-1.5">
+                      {agent.activityDetail && (
+                        <div className="text-[10px] text-mc-text-secondary break-all">
+                          {agent.activityDetail}
+                        </div>
+                      )}
+                      <div className="text-[10px] text-mc-text-secondary/40">
+                        Session: {agent.label}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           ) : (
             <div className="p-4 text-center">
@@ -170,19 +169,35 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
               <p className="text-xs text-mc-text-secondary/50">
                 {loading ? 'Loading...' : 'No agents active'}
               </p>
+              <p className="text-[10px] text-mc-text-secondary/30 mt-1">
+                Launch a mission to see agents work
+              </p>
             </div>
           )}
 
           {/* Recently completed */}
-          {recentAgents.length > 0 && (
+          {data.recent.length > 0 && (
             <div className="p-3 border-t border-mc-border/30">
-              <p className="text-[10px] uppercase text-mc-text-secondary/40 font-medium mb-2 tracking-wider">Recent</p>
-              <div className="space-y-1.5">
-                {recentAgents.map((agent, i) => (
-                  <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded text-mc-text-secondary/60">
-                    {getStatusIcon(agent)}
-                    <span className="text-[11px] truncate flex-1">{getTaskSummary(agent)}</span>
-                    <span className="text-[10px] text-mc-text-secondary/30">{agent.runtime}</span>
+              <p className="text-[10px] uppercase text-mc-text-secondary/40 font-medium mb-2 tracking-wider">
+                Recent
+              </p>
+              <div className="space-y-1">
+                {data.recent.map((agent, i) => (
+                  <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-mc-bg-tertiary/30 transition-colors">
+                    {agent.status === 'done' || agent.status === 'completed'
+                      ? <CheckCircle className="w-3 h-3 text-green-400/60 flex-shrink-0" />
+                      : <XCircle className="w-3 h-3 text-red-400/60 flex-shrink-0" />
+                    }
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[11px] text-mc-text-secondary/60 truncate block">{agent.stepName}</span>
+                      <span className="text-[9px] text-mc-text-secondary/30">{agent.pipelineName}</span>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <span className="text-[10px] text-mc-text-secondary/30 block">{agent.runtime}</span>
+                      {agent.totalTokens && (
+                        <span className="text-[9px] text-mc-text-secondary/20">{(agent.totalTokens / 1000).toFixed(1)}k tok</span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
