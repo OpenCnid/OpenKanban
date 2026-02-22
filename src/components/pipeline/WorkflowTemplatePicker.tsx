@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { X, ArrowLeft, Play } from 'lucide-react';
+import { X, ArrowLeft, Play, Plus } from 'lucide-react';
 import { useMissionControl } from '@/lib/store';
+import { WorkflowTemplateEditor } from './WorkflowTemplateEditor';
 import type { WorkflowTemplate } from '@/lib/types';
 
 interface WorkflowTemplatePickerProps {
@@ -11,10 +12,38 @@ interface WorkflowTemplatePickerProps {
 }
 
 export function WorkflowTemplatePicker({ onClose, onTrigger }: WorkflowTemplatePickerProps) {
-  const { workflowTemplates } = useMissionControl();
+  const { workflowTemplates, addWorkflowTemplate } = useMissionControl();
   const [selectedTemplate, setSelectedTemplate] = useState<WorkflowTemplate | null>(null);
   const [triggerInput, setTriggerInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
+
+  const handleCreateTemplate = async (template: {
+    name: string;
+    description: string;
+    icon: string;
+    steps: Array<{ name: string; agent_role?: string; depends_on?: string; review?: boolean }>;
+  }) => {
+    const res = await fetch('/api/workflows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: template.name,
+        description: template.description,
+        icon: template.icon,
+        trigger_type: 'manual',
+        steps: template.steps,
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error('Failed to create workflow template');
+    }
+
+    const created = await res.json();
+    addWorkflowTemplate(created);
+    setShowEditor(false);
+  };
 
   const handleSubmit = async () => {
     if (!selectedTemplate) return;
@@ -55,13 +84,28 @@ export function WorkflowTemplatePicker({ onClose, onTrigger }: WorkflowTemplateP
         {!selectedTemplate ? (
           // Template list
           <div className="p-4 space-y-2 max-h-[400px] overflow-y-auto">
+            {/* Create new button */}
+            <button
+              onClick={() => setShowEditor(true)}
+              className="w-full text-left p-3 rounded-lg border border-dashed border-mc-accent/30 hover:border-mc-accent/60 hover:bg-mc-accent/5 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-mc-accent/10 flex items-center justify-center">
+                  <Plus className="w-4 h-4 text-mc-accent" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm text-mc-accent">Create New Workflow</h3>
+                  <p className="text-xs text-mc-text-secondary mt-0.5">Define steps, dependencies, and review checkpoints</p>
+                </div>
+              </div>
+            </button>
+
             {workflowTemplates.length === 0 ? (
-              <div className="text-center py-8 text-mc-text-secondary">
-                <p className="text-sm">No workflow templates available.</p>
-                <p className="text-xs mt-1">Create one via the API first.</p>
+              <div className="text-center py-4 text-mc-text-secondary">
+                <p className="text-xs">No templates yet — create your first one above.</p>
               </div>
             ) : (
-              workflowTemplates.map((template) => (
+              workflowTemplates.filter(t => t.enabled).map((template) => (
                 <button
                   key={template.id}
                   onClick={() => setSelectedTemplate(template)}
@@ -135,6 +179,14 @@ export function WorkflowTemplatePicker({ onClose, onTrigger }: WorkflowTemplateP
           </div>
         )}
       </div>
+
+      {/* Template Editor Modal */}
+      {showEditor && (
+        <WorkflowTemplateEditor
+          onClose={() => setShowEditor(false)}
+          onSave={handleCreateTemplate}
+        />
+      )}
     </div>
   );
 }
