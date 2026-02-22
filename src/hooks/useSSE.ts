@@ -8,7 +8,7 @@
 import { useEffect, useRef } from 'react';
 import { useMissionControl } from '@/lib/store';
 import { debug } from '@/lib/debug';
-import type { SSEEvent, Task, WorkflowRun, Alert } from '@/lib/types';
+import type { SSEEvent, Task, WorkflowRun, Alert, Approval } from '@/lib/types';
 
 export function useSSE() {
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -120,6 +120,19 @@ export function useSSE() {
             case 'alert_created':
               debug.sse('Alert created', sseEvent.payload);
               addAlert(sseEvent.payload as Alert);
+              break;
+
+            case 'approval_created':
+              debug.sse('Approval created', sseEvent.payload);
+              // Approvals refresh when the approval tab or step detail is viewed
+              break;
+
+            case 'approval_updated':
+              debug.sse('Approval updated', sseEvent.payload);
+              break;
+
+            case 'notification_created':
+              debug.sse('Notification created', sseEvent.payload);
               break;
 
             default:

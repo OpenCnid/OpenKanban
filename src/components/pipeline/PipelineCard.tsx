@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { XCircle } from 'lucide-react';
 import { PipelineStepChain, type PipelineStep } from './PipelineStepChain';
@@ -59,6 +59,25 @@ export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun }: 
   const handleCancel = useCallback(() => {
     onCancelRun?.(run.id);
   }, [run.id, onCancelRun]);
+
+  // Running duration timer
+  const [elapsed, setElapsed] = useState('');
+  useEffect(() => {
+    if (run.status !== 'running' && run.status !== 'paused') {
+      setElapsed('');
+      return;
+    }
+    const startTime = new Date(run.startedAt).getTime();
+    const update = () => {
+      const diff = Math.floor((Date.now() - startTime) / 1000);
+      const mins = Math.floor(diff / 60);
+      const secs = diff % 60;
+      setElapsed(mins > 0 ? `${mins}m ${secs}s` : `${secs}s`);
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [run.status, run.startedAt]);
 
   const selectedStepDetail = selectedStep !== null ? run.stepDetails?.[selectedStep] : null;
 
@@ -126,6 +145,11 @@ export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun }: 
         <span>
           Started {formatDistanceToNow(new Date(run.startedAt), { addSuffix: true })}
         </span>
+        {elapsed && (
+          <span className="font-mono text-mc-text-secondary/80">
+            ⏱ {elapsed}
+          </span>
+        )}
         {run.completedAt && (
           <span>
             Completed {formatDistanceToNow(new Date(run.completedAt), { addSuffix: true })}
