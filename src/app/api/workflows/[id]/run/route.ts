@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { queryOne, run, transaction } from '@/lib/db';
 import { broadcast } from '@/lib/events';
+import { executeNextStep } from '@/lib/workflow-engine';
 import type { WorkflowTemplate, WorkflowStep, WorkflowRun, Task } from '@/lib/types';
 
 // POST /api/workflows/[id]/run - Trigger a workflow run from a template
@@ -112,6 +113,15 @@ export async function POST(
       if (task) {
         broadcast({ type: 'task_created', payload: task });
       }
+    }
+
+    // Auto-execute first step if auto_execute is not explicitly false
+    const autoExecute = body.auto_execute !== false;
+    if (autoExecute) {
+      // Execute asynchronously — don't block the response
+      executeNextStep(result.runId).catch(err => {
+        console.error(`[WorkflowRun] Auto-execute failed for run ${result.runId}:`, err);
+      });
     }
 
     return NextResponse.json({
