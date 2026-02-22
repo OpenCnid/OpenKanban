@@ -1,23 +1,43 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, GitBranch, LayoutList, ShieldCheck, Brain } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { AgentsSidebar } from '@/components/AgentsSidebar';
 import { MissionQueue } from '@/components/MissionQueue';
 import { LiveFeed } from '@/components/LiveFeed';
 import { SSEDebugPanel } from '@/components/SSEDebugPanel';
+import { PipelineView } from '@/components/pipeline/PipelineView';
 import { useMissionControl } from '@/lib/store';
 import { useSSE } from '@/hooks/useSSE';
 import { debug } from '@/lib/debug';
 import type { Task, Workspace } from '@/lib/types';
 
+const TABS = [
+  { id: 'pipelines', label: 'Pipelines', icon: GitBranch },
+  { id: 'tasks', label: 'Tasks', icon: LayoutList },
+  { id: 'approvals', label: 'Approvals', icon: ShieldCheck },
+  { id: 'memory', label: 'Memory', icon: Brain },
+] as const;
+
+type TabId = typeof TABS[number]['id'];
+
 export default function WorkspacePage() {
   const params = useParams();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const slug = params.slug as string;
   
+  const activeTab = (searchParams.get('tab') as TabId) || 'pipelines';
+
+  const setTab = (tab: TabId) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', tab);
+    router.replace(url.pathname + url.search);
+  };
+
   const {
     setAgents,
     setTasks,
@@ -25,6 +45,8 @@ export default function WorkspacePage() {
     setIsOnline,
     setIsLoading,
     isLoading,
+    setWorkflowTemplates,
+    setWorkflowRuns,
   } = useMissionControl();
 
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -67,11 +89,13 @@ export default function WorkspacePage() {
       try {
         debug.api('Loading workspace data...', { workspaceId });
         
-        // Fetch workspace-scoped data
-        const [agentsRes, tasksRes, eventsRes] = await Promise.all([
+        // Fetch workspace-scoped data (including workflows)
+        const [agentsRes, tasksRes, eventsRes, templatesRes, runsRes] = await Promise.all([
           fetch(`/api/agents?workspace_id=${workspaceId}`),
           fetch(`/api/tasks?workspace_id=${workspaceId}`),
           fetch('/api/events'),
+          fetch(`/api/workflows?workspace_id=${workspaceId}`),
+          fetch(`/api/workflows/runs?workspace_id=${workspaceId}`),
         ]);
 
         if (agentsRes.ok) setAgents(await agentsRes.json());
@@ -81,6 +105,8 @@ export default function WorkspacePage() {
           setTasks(tasksData);
         }
         if (eventsRes.ok) setEvents(await eventsRes.json());
+        if (templatesRes.ok) setWorkflowTemplates(await templatesRes.json());
+        if (runsRes.ok) setWorkflowRuns(await runsRes.json());
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -166,7 +192,7 @@ export default function WorkspacePage() {
       clearInterval(connectionCheck);
       clearInterval(taskPoll);
     };
-  }, [workspace, setAgents, setTasks, setEvents, setIsOnline, setIsLoading]);
+  }, [workspace, setAgents, setTasks, setEvents, setIsOnline, setIsLoading, setWorkflowTemplates, setWorkflowRuns]);
 
   if (notFound) {
     return (
@@ -204,12 +230,55 @@ export default function WorkspacePage() {
     <div className="h-screen flex flex-col bg-mc-bg overflow-hidden">
       <Header workspace={workspace} />
 
+      {/* Tab Navigation */}
+      <div className="flex items-center gap-1 px-4 border-b border-mc-border bg-mc-bg-secondary">
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+                isActive
+                  ? 'text-white border-mc-accent'
+                  : 'text-mc-text-secondary border-transparent hover:text-mc-text hover:border-mc-border'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex-1 flex overflow-hidden">
         {/* Agents Sidebar */}
         <AgentsSidebar workspaceId={workspace.id} />
 
-        {/* Main Content Area */}
-        <MissionQueue workspaceId={workspace.id} />
+        {/* Main Content Area — tab-dependent */}
+        {activeTab === 'pipelines' && (
+          <PipelineView workspaceId={workspace.id} />
+        )}
+        {activeTab === 'tasks' && (
+          <MissionQueue workspaceId={workspace.id} />
+        )}
+        {activeTab === 'approvals' && (
+          <div className="flex-1 flex items-center justify-center text-mc-text-secondary">
+            <div className="text-center">
+              <ShieldCheck className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-lg font-medium">No pending approvals.</p>
+            </div>
+          </div>
+        )}
+        {activeTab === 'memory' && (
+          <div className="flex-1 flex items-center justify-center text-mc-text-secondary">
+            <div className="text-center">
+              <Brain className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-lg font-medium">Memory browser coming soon.</p>
+            </div>
+          </div>
+        )}
 
         {/* Live Feed */}
         <LiveFeed />
