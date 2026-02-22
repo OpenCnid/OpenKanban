@@ -180,41 +180,11 @@ export async function routeInput(
   const catalog = buildTemplateCatalog(templates);
   const prompt = buildRoutingPrompt(userInput, catalog);
 
-  try {
-    const client = getOpenClawClient();
-    if (!client.isConnected()) {
-      await client.connect();
-    }
-
-    // Use sessions_spawn with a quick timeout for routing
-    const result = await client.spawnSession({
-      task: prompt,
-      label: `router-${Date.now()}`,
-      cleanup: 'delete', // Clean up routing sessions
-      runTimeoutSeconds: 30, // Routing should be fast
-    });
-
-    // The result from sessions_spawn includes the agent's response
-    // We need to parse the JSON from the response
-    const responseText = extractResponseText(result);
-    const parsed = parseRoutingResponse(responseText);
-
-    // Record retrieval if a template was matched
-    if (parsed.path === 'A' && parsed.matchedTemplateId) {
-      recordRetrieval(parsed.matchedTemplateId);
-    } else if (parsed.path === 'B' && parsed.suggestions) {
-      for (const s of parsed.suggestions) {
-        recordRetrieval(s.templateId);
-      }
-    }
-
-    return parsed;
-  } catch (err) {
-    console.error('[WorkflowRouter] Routing failed:', err);
-
-    // Fallback: simple keyword matching
-    return fallbackRoute(userInput, templates);
-  }
+  // Use fast keyword/heuristic routing (LLM routing via sessions_spawn
+  // doesn't return inline text — would need polling like the step executor).
+  // Keyword matching is instant and works well for small template libraries.
+  // TODO: Add LLM routing when template count exceeds ~20.
+  return fallbackRoute(userInput, templates);
 }
 
 /**

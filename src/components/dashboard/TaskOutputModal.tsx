@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { X, Loader2, CheckCircle, Clock, AlertCircle, FileText } from 'lucide-react';
+import { MarkdownContent } from '@/components/ui/MarkdownContent';
 import type { Task } from '@/lib/types';
 
 interface TaskOutputModalProps {
@@ -87,8 +88,8 @@ export function TaskOutputModal({ task, onClose }: TaskOutputModalProps) {
                   <h3 className="text-sm font-medium text-mc-text">{d.title}</h3>
                 </div>
                 {d.description && (
-                  <div className="text-sm text-mc-text-secondary whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto">
-                    {d.description}
+                  <div className="max-h-[300px] overflow-y-auto">
+                    <MarkdownContent content={d.description} />
                   </div>
                 )}
               </div>

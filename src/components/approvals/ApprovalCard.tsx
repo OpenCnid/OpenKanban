@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Check, X, Clock, ChevronDown, ChevronUp, GitBranch, FileText, Loader2 } from 'lucide-react';
+import { MarkdownContent } from '@/components/ui/MarkdownContent';
 import type { Approval } from '@/lib/types';
 
 interface ApprovalWithJoins extends Approval {
@@ -141,8 +142,8 @@ export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProp
                 <span className="text-xs font-medium text-mc-text">{d.title}</span>
               </div>
               {d.description && (
-                <div className="text-sm text-mc-text-secondary whitespace-pre-wrap leading-relaxed max-h-[400px] overflow-y-auto">
-                  {d.description}
+                <div className="max-h-[400px] overflow-y-auto">
+                  <MarkdownContent content={d.description} />
                 </div>
               )}
             </div>

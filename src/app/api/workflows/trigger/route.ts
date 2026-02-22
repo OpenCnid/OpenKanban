@@ -159,6 +159,61 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // Path D: No template match — create ad-hoc workflow from proposed steps
+  if (routeResult.path === 'D' && routeResult.proposedWorkflow && auto_execute) {
+    const proposed = routeResult.proposedWorkflow;
+    const templateId = uuidv4();
+    const now = new Date().toISOString();
+
+    // Create the template dynamically
+    db.prepare(
+      `INSERT INTO workflow_templates (id, workspace_id, name, description, icon, trigger_type, steps, enabled, status, total_runs, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'active', 0, ?, ?)`
+    ).run(
+      templateId,
+      workspace_id,
+      proposed.name,
+      proposed.description || input,
+      '🤖',
+      'manual',
+      JSON.stringify(proposed.steps),
+      now,
+      now,
+    );
+
+    console.log(`[Trigger] Created ad-hoc template "${proposed.name}" (${templateId}) with ${proposed.steps.length} steps`);
+
+    // Trigger the run
+    const baseUrl = `http://localhost:${process.env.PORT || 4000}`;
+    const runRes = await fetch(`${baseUrl}/api/workflows/${templateId}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        trigger_input: input,
+        trigger_method: source || 'ad-hoc',
+        auto_execute: true,
+      }),
+    });
+
+    if (!runRes.ok) {
+      return NextResponse.json({
+        action: 'route_failed',
+        routing: routeResult,
+        error: 'Failed to create ad-hoc run',
+      }, { status: 500 });
+    }
+
+    const run = await runRes.json();
+    return NextResponse.json({
+      action: 'auto_triggered',
+      run_id: run.id,
+      template_name: proposed.name,
+      routing: routeResult,
+      source: source || 'agent',
+      ad_hoc: true,
+    });
+  }
+
   // Not confident enough to auto-execute — create notification for Hans
   const notifId = uuidv4();
   const now = new Date().toISOString();

@@ -5,6 +5,7 @@ import { GitBranch, Plus } from 'lucide-react';
 import { PipelineCard, type PipelineRunData } from './PipelineCard';
 import { PipelineFilters, type PipelineFilter } from './PipelineFilters';
 import { MissionPrompt } from './MissionPrompt';
+import { RunCompletedModal } from './RunCompletedModal';
 import { useMissionControl } from '@/lib/store';
 import type { StepState, PipelineStep } from './PipelineStepChain';
 import type { StepDetailData } from './PipelineStepDetail';
@@ -31,6 +32,8 @@ function taskStatusToStepState(status: TaskStatus): StepState {
 export function PipelineView({ workspaceId }: PipelineViewProps) {
   const [filter, setFilter] = useState<PipelineFilter>('all');
   const [showMissionPrompt, setShowMissionPrompt] = useState(false);
+  const [completedRun, setCompletedRun] = useState<{ id: string; name: string } | null>(null);
+  const [seenCompletedRuns] = useState(() => new Set<string>());
 
   const { workflowRuns, workflowTemplates, tasks, setWorkflowRuns } = useMissionControl();
 
@@ -62,6 +65,16 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
     window.addEventListener('sse-event', handler);
     return () => window.removeEventListener('sse-event', handler);
   }, [workspaceId, setWorkflowRuns]);
+
+  // Detect newly completed runs and show the completion modal
+  useEffect(() => {
+    for (const run of workflowRuns) {
+      if (run.status === 'completed' && !seenCompletedRuns.has(run.id)) {
+        seenCompletedRuns.add(run.id);
+        setCompletedRun({ id: run.id, name: run.name || 'Pipeline' });
+      }
+    }
+  }, [workflowRuns, seenCompletedRuns]);
 
   // Build PipelineRunData from real workflow runs + their tasks
   const pipelineRuns = useMemo((): PipelineRunData[] => {
@@ -337,6 +350,15 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
             icon: t.icon || '⚡',
             description: t.description,
           }))}
+        />
+      )}
+
+      {/* Run Completed Modal — shows full synthesis when pipeline finishes */}
+      {completedRun && (
+        <RunCompletedModal
+          runId={completedRun.id}
+          runName={completedRun.name}
+          onClose={() => setCompletedRun(null)}
         />
       )}
     </div>

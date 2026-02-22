@@ -46,6 +46,11 @@ export async function GET(request: NextRequest) {
       sql += ' AND t.workspace_id = ?';
       params.push(workspaceId);
     }
+    const workflowRunId = searchParams.get('workflow_run_id');
+    if (workflowRunId) {
+      sql += ' AND t.workflow_run_id = ?';
+      params.push(workflowRunId);
+    }
     if (assignedAgentId) {
       sql += ' AND t.assigned_agent_id = ?';
       params.push(assignedAgentId);
