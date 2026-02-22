@@ -10,6 +10,7 @@ import { MissionQueue } from '@/components/MissionQueue';
 import { LiveFeed } from '@/components/LiveFeed';
 import { SSEDebugPanel } from '@/components/SSEDebugPanel';
 import { PipelineView } from '@/components/pipeline/PipelineView';
+import { ApprovalsList } from '@/components/approvals/ApprovalsList';
 import { useMissionControl } from '@/lib/store';
 import { useSSE } from '@/hooks/useSSE';
 import { debug } from '@/lib/debug';
@@ -51,6 +52,7 @@ export default function WorkspacePage() {
 
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
 
   // Connect to SSE for real-time updates
   useSSE();
@@ -247,6 +249,11 @@ export default function WorkspacePage() {
             >
               <Icon className="w-4 h-4" />
               {tab.label}
+              {tab.id === 'approvals' && pendingApprovals > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-400 rounded-full leading-none">
+                  {pendingApprovals}
+                </span>
+              )}
             </button>
           );
         })}
@@ -264,12 +271,10 @@ export default function WorkspacePage() {
           <MissionQueue workspaceId={workspace.id} />
         )}
         {activeTab === 'approvals' && (
-          <div className="flex-1 flex items-center justify-center text-mc-text-secondary">
-            <div className="text-center">
-              <ShieldCheck className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="text-lg font-medium">No pending approvals.</p>
-            </div>
-          </div>
+          <ApprovalsList
+            workspaceId={workspace.id}
+            onCountChange={setPendingApprovals}
+          />
         )}
         {activeTab === 'memory' && (
           <div className="flex-1 flex items-center justify-center text-mc-text-secondary">

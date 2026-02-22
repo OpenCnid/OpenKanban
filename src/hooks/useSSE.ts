@@ -124,11 +124,12 @@ export function useSSE() {
 
             case 'approval_created':
               debug.sse('Approval created', sseEvent.payload);
-              // Approvals refresh when the approval tab or step detail is viewed
+              window.dispatchEvent(new CustomEvent('sse-event', { detail: sseEvent }));
               break;
 
             case 'approval_updated':
               debug.sse('Approval updated', sseEvent.payload);
+              window.dispatchEvent(new CustomEvent('sse-event', { detail: sseEvent }));
               break;
 
             case 'notification_created':
