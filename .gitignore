@@ -52,3 +52,6 @@ next-env.d.ts
 *.bak
 *.db.backup
 .env.local
+
+# Pipeline output files (user data)
+pipeline-outputs/

@@ -64,7 +64,14 @@ export function ApprovalsList({ workspaceId, onCountChange }: ApprovalsListProps
       body: JSON.stringify({ status: 'approved', resolution_notes: notes }),
     });
     if (res.ok) {
+      const data = await res.json();
       await fetchApprovals();
+
+      // Continue pipeline execution after approval
+      const runId = data.workflow_run_id;
+      if (runId) {
+        fetch(`/api/workflows/runs/${runId}/execute`, { method: 'POST' }).catch(() => {});
+      }
     }
   };
 

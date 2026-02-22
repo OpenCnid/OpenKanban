@@ -15,10 +15,13 @@ console.log('[WorkflowEngine] MODULE LOADED');
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import * as fs from 'fs';
+import * as path from 'path';
 import { queryOne, queryAll, run } from '@/lib/db';
 import { getOpenClawClient } from '@/lib/openclaw/client';
 import { broadcast } from '@/lib/events';
 import { recordOutcome } from '@/lib/workflow-intelligence';
+import { getWorkspaceBasePath } from '@/lib/config';
 import type { Task, WorkflowRun, WorkflowStep, WorkflowTemplate, Approval } from '@/lib/types';
 
 // Track tasks with active inline watchers (inside /execute endpoint)
@@ -370,6 +373,9 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
     // Record outcome + update template stats via intelligence module
     recordOutcome(runId);
 
+    // Write consolidated output file to workspace
+    writeRunOutput(runId);
+
     console.log(`[WorkflowEngine] Run ${runId} completed successfully`);
   }
 
@@ -493,11 +499,20 @@ export async function approveStep(taskId: string, notes?: string): Promise<{ suc
     [task.workflow_run_id]
   );
 
-  // Mark task as done and advance
+  // Mark task as done and set run back to 'running' so /execute can pick it up
   updateTaskStatus(taskId, 'done');
-  await onStepCompleted(taskId);
 
-  return { success: true };
+  // Set run status to 'running' (from 'paused')
+  if (task.workflow_run_id) {
+    const wr = queryOne<WorkflowRun>('SELECT status FROM workflow_runs WHERE id = ?', [task.workflow_run_id]);
+    if (wr && wr.status === 'paused') {
+      updateRunStatus(task.workflow_run_id, 'running');
+    }
+  }
+
+  // Don't chain executeNextStep here — return immediately so the PATCH
+  // doesn't block for minutes. The UI will call /execute to continue.
+  return { success: true, runId: task.workflow_run_id };
 }
 
 /**
@@ -818,6 +833,133 @@ async function pollActiveSteps(): Promise<void> {
   } catch (err) {
     console.warn('[WorkflowEngine] Poller error:', err);
   }
+}
+
+// ============================================================
+// Pipeline output file writer
+// ============================================================
+
+function writeRunOutput(runId: string): void {
+  try {
+    const workflowRun = queryOne<WorkflowRun>('SELECT * FROM workflow_runs WHERE id = ?', [runId]);
+    if (!workflowRun) return;
+
+    const template = queryOne<WorkflowTemplate>('SELECT * FROM workflow_templates WHERE id = ?', [workflowRun.template_id]);
+    if (!template) return;
+
+    // Get all tasks for this run, ordered by step index
+    const tasks = queryAll<Task>(
+      'SELECT * FROM tasks WHERE workflow_run_id = ? ORDER BY workflow_step_index ASC',
+      [runId]
+    );
+
+    // Get deliverables for each task
+    type Deliverable = { task_id: string; title: string; description: string };
+    const deliverablesByTask = new Map<string, Deliverable[]>();
+    for (const task of tasks) {
+      const delivs = queryAll<Deliverable>(
+        'SELECT * FROM task_deliverables WHERE task_id = ? ORDER BY created_at ASC',
+        [task.id]
+      );
+      deliverablesByTask.set(task.id, delivs);
+    }
+
+    // Build the output file content
+    const triggerInput = workflowRun.trigger_input || workflowRun.name || 'untitled';
+    const startedAt = workflowRun.started_at || workflowRun.created_at;
+    const completedAt = workflowRun.completed_at || new Date().toISOString();
+
+    const lines: string[] = [];
+    lines.push(`# ${triggerInput}`);
+    lines.push(`**Pipeline:** ${template.name}`);
+    lines.push(`**Started:** ${formatTimestamp(startedAt)}`);
+    lines.push(`**Completed:** ${formatTimestamp(completedAt)}`);
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+
+    for (const task of tasks) {
+      lines.push(`## ${task.title}`);
+      lines.push('');
+
+      const delivs = deliverablesByTask.get(task.id) || [];
+      if (delivs.length > 0) {
+        for (const d of delivs) {
+          if (d.description) {
+            lines.push(d.description);
+            lines.push('');
+          }
+        }
+      } else {
+        lines.push('*(no output captured)*');
+        lines.push('');
+      }
+    }
+
+    // Build file path: {workspace}/pipeline-outputs/{template-slug}/{timestamp}_{trigger-slug}.md
+    const workspacePath = resolveHome(getWorkspaceBasePath());
+    const templateSlug = slugify(template.name);
+    const triggerSlug = slugify(triggerInput).slice(0, 60);
+    const timestamp = formatFileTimestamp(startedAt);
+    const fileName = `${timestamp}_${triggerSlug}.md`;
+
+    const outputDir = path.join(workspacePath, 'pipeline-outputs', templateSlug);
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    const filePath = path.join(outputDir, fileName);
+    fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
+
+    // Store the file path in the run metadata
+    run(
+      'UPDATE workflow_runs SET outcome = ? WHERE id = ?',
+      [`All steps completed successfully. Output: ${filePath}`, runId]
+    );
+
+    console.log(`[WorkflowEngine] Pipeline output written to: ${filePath}`);
+
+    // Broadcast the file write event
+    broadcast({
+      type: 'pipeline_output',
+      taskId: runId,
+      message: `Pipeline output saved to ${filePath}`,
+    });
+
+  } catch (err) {
+    console.error(`[WorkflowEngine] Failed to write run output:`, err);
+  }
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
+  return d.toLocaleString('en-US', {
+    timeZone: 'America/Chicago',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function formatFileTimestamp(iso: string): string {
+  const d = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  // Adjust for CST (-6)
+  const cst = new Date(d.getTime() - 6 * 60 * 60 * 1000);
+  return `${cst.getUTCFullYear()}-${pad(cst.getUTCMonth() + 1)}-${pad(cst.getUTCDate())}_${pad(cst.getUTCHours())}-${pad(cst.getUTCMinutes())}`;
+}
+
+function resolveHome(p: string): string {
+  if (p.startsWith('~/')) {
+    return path.join(process.env.HOME || '/home/user', p.slice(2));
+  }
+  return p;
 }
 
 async function handleStepCompletion(taskId: string, output: string): Promise<void> {

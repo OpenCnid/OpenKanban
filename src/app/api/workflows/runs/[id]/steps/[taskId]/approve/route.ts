@@ -20,7 +20,7 @@ export async function POST(
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, message: 'Step approved, pipeline advancing' });
+    return NextResponse.json({ success: true, runId: result.runId, message: 'Step approved. Call /execute to continue pipeline.' });
   } catch (error) {
     console.error('Failed to approve step:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
