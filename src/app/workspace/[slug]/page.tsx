@@ -5,7 +5,7 @@ import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronLeft, LayoutDashboard, GitBranch, LayoutList, ShieldCheck, Brain, TrendingUp, Megaphone, Cpu } from 'lucide-react';
 import { Header } from '@/components/Header';
-import { AgentsSidebar } from '@/components/AgentsSidebar';
+import { LiveAgentsSidebar } from '@/components/LiveAgentsSidebar';
 import { MissionQueue } from '@/components/MissionQueue';
 import { LiveFeed } from '@/components/LiveFeed';
 import { SSEDebugPanel } from '@/components/SSEDebugPanel';
@@ -287,8 +287,8 @@ export default function WorkspacePage() {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Agents Sidebar */}
-        <AgentsSidebar workspaceId={workspace.id} />
+        {/* Live Agents Sidebar */}
+        <LiveAgentsSidebar workspaceId={workspace.id} />
 
         {/* Main Content Area — tab-dependent */}
         {activeTab === 'overview' && (

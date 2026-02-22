@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { GitBranch, Plus } from 'lucide-react';
 import { PipelineCard, type PipelineRunData } from './PipelineCard';
 import { PipelineFilters, type PipelineFilter } from './PipelineFilters';
-import { WorkflowTemplatePicker } from './WorkflowTemplatePicker';
+import { MissionPrompt } from './MissionPrompt';
 import { useMissionControl } from '@/lib/store';
 import type { StepState, PipelineStep } from './PipelineStepChain';
 import type { StepDetailData } from './PipelineStepDetail';
@@ -30,9 +30,9 @@ function taskStatusToStepState(status: TaskStatus): StepState {
 
 export function PipelineView({ workspaceId }: PipelineViewProps) {
   const [filter, setFilter] = useState<PipelineFilter>('all');
-  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [showMissionPrompt, setShowMissionPrompt] = useState(false);
 
-  const { workflowRuns, tasks, setWorkflowRuns } = useMissionControl();
+  const { workflowRuns, workflowTemplates, tasks, setWorkflowRuns } = useMissionControl();
 
   // SSE-driven refresh — re-fetch runs + tasks when step/run events arrive
   useEffect(() => {
@@ -148,36 +148,49 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
     failed: pipelineRuns.filter((r) => r.status === 'failed' || r.status === 'cancelled').length,
   }), [pipelineRuns]);
 
-  const handleTriggerRun = useCallback(async (templateId: string, triggerInput: string) => {
+  const handleLaunchMission = useCallback(async (input: string, options?: { templateId?: string }) => {
     try {
-      const res = await fetch(`/api/workflows/${templateId}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trigger_input: triggerInput }),
-      });
-
-      if (!res.ok) {
-        console.error('Failed to trigger run:', await res.text());
-        return;
+      if (options?.templateId) {
+        // Direct template trigger
+        const res = await fetch(`/api/workflows/${options.templateId}/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trigger_input: input }),
+        });
+        if (!res.ok) {
+          console.error('Failed to trigger run:', await res.text());
+          return;
+        }
+      } else {
+        // Freeform trigger — route through semantic router
+        const res = await fetch('/api/workflows/trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input,
+            source: 'dashboard',
+            auto_execute: true,
+          }),
+        });
+        if (!res.ok) {
+          console.error('Failed to trigger:', await res.text());
+          return;
+        }
       }
 
-      // Re-fetch runs + tasks to get fresh data
+      // Re-fetch runs + tasks
       const [runsRes, tasksRes] = await Promise.all([
         fetch(`/api/workflows/runs?workspace_id=${workspaceId}`),
         fetch(`/api/tasks?workspace_id=${workspaceId}`),
       ]);
 
-      if (runsRes.ok) {
-        const runs = await runsRes.json();
-        setWorkflowRuns(runs);
-      }
+      if (runsRes.ok) setWorkflowRuns(await runsRes.json());
+      if (tasksRes.ok) useMissionControl.getState().setTasks(await tasksRes.json());
 
-      if (tasksRes.ok) {
-        const tasksData = await tasksRes.json();
-        useMissionControl.getState().setTasks(tasksData);
-      }
+      // Switch to 'all' or 'running' filter so user sees the new run
+      setFilter('all');
     } catch (error) {
-      console.error('Failed to trigger workflow run:', error);
+      console.error('Failed to launch mission:', error);
     }
   }, [workspaceId, setWorkflowRuns]);
 
@@ -271,11 +284,11 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
           />
         </div>
         <button
-          onClick={() => setShowTemplatePicker(true)}
+          onClick={() => setShowMissionPrompt(true)}
           className="flex items-center gap-2 px-3 py-1.5 bg-mc-accent text-mc-bg rounded text-sm font-medium hover:bg-mc-accent/90"
         >
           <Plus className="w-4 h-4" />
-          New Workflow
+          New Mission
         </button>
       </div>
 
@@ -286,9 +299,9 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
             <div className="text-center text-mc-text-secondary">
               <GitBranch className="w-16 h-16 mx-auto mb-4 opacity-20" />
               <p className="text-lg font-medium mb-1">
-                {filter !== 'all' ? `No ${filter} pipelines.` : 'No active pipelines.'}
+                {filter !== 'all' ? `No ${filter} pipelines.` : 'No active missions.'}
               </p>
-              <p className="text-sm">Click + New Workflow to get started.</p>
+              <p className="text-sm">Click <span className="text-mc-accent">+ New Mission</span> to tell the agent what you need.</p>
             </div>
           </div>
         ) : (
@@ -304,14 +317,17 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         )}
       </div>
 
-      {/* Template Picker Modal */}
-      {showTemplatePicker && (
-        <WorkflowTemplatePicker
-          onClose={() => setShowTemplatePicker(false)}
-          onTrigger={(templateId, triggerInput) => {
-            handleTriggerRun(templateId, triggerInput);
-            setShowTemplatePicker(false);
-          }}
+      {/* Mission Prompt Modal */}
+      {showMissionPrompt && (
+        <MissionPrompt
+          onClose={() => setShowMissionPrompt(false)}
+          onSubmit={handleLaunchMission}
+          templates={workflowTemplates.filter(t => t.enabled).map(t => ({
+            id: t.id,
+            name: t.name,
+            icon: t.icon || '⚡',
+            description: t.description,
+          }))}
         />
       )}
     </div>
