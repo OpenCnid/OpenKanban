@@ -21,6 +21,14 @@ import { broadcast } from '@/lib/events';
 import { recordOutcome } from '@/lib/workflow-intelligence';
 import type { Task, WorkflowRun, WorkflowStep, WorkflowTemplate, Approval } from '@/lib/types';
 
+// Track tasks with active inline watchers (inside /execute endpoint)
+// The global poller must skip these — they have their own polling loop
+const WF_INLINE_KEY = '__wf_inline_watched__';
+if (!(WF_INLINE_KEY in globalThis)) {
+  (globalThis as Record<string, unknown>)[WF_INLINE_KEY] = new Set<string>();
+}
+const inlineWatchedTasks = (globalThis as unknown as Record<string, Set<string>>)[WF_INLINE_KEY];
+
 // Track active step sessions on globalThis to survive Next.js HMR
 const WF_SESSIONS_KEY = '__wf_active_sessions__';
 if (!(WF_SESSIONS_KEY in globalThis)) {
@@ -286,6 +294,9 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
 
       console.log(`[WorkflowEngine] Step "${step.name}" spawned — session: ${sessionKey}`);
 
+      // Mark this task as inline-watched so the global poller skips it
+      inlineWatchedTasks.add(task.id);
+
       // Poll until the sub-agent completes, then extract output
       // This runs inside the /execute endpoint which has its own HTTP request context
       const maxWait = 300000; // 5 min
@@ -295,10 +306,11 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
       while (Date.now() - start < maxWait) {
         await new Promise(r => setTimeout(r, pollMs));
 
-        // Check task hasn't been cancelled
+        // Check task hasn't been cancelled or already handled by global poller
         const freshTask = queryOne<Task>('SELECT status FROM tasks WHERE id = ?', [task.id]);
         if (!freshTask || freshTask.status !== 'in_progress') {
-          console.log(`[WorkflowEngine] Task ${task.id} no longer in_progress (${freshTask?.status}), stopping`);
+          console.log(`[WorkflowEngine] Task ${task.id} no longer in_progress (${freshTask?.status}), stopping inline watcher`);
+          inlineWatchedTasks.delete(task.id);
           return { executed: true, taskId: task.id };
         }
 
@@ -310,21 +322,22 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
 
         if (!agent || agent.status === 'done' || agent.status === 'completed') {
           // Agent finished — extract output from history
-          const output = await extractSessionOutput(client, agent?.sessionKey ? String(agent.sessionKey) : sessionKey);
+          const agentKey = agent?.sessionKey ? String(agent.sessionKey) : sessionKey;
+          const output = await extractSessionOutput(client, agentKey);
           console.log(`[WorkflowEngine] Step "${step.name}" done — output: ${output.length} chars`);
 
-          handleStepCompletion(task.id, output.slice(0, 5000) || 'Agent completed successfully');
+          inlineWatchedTasks.delete(task.id);
+          await handleStepCompletion(task.id, output.slice(0, 5000) || 'Agent completed successfully');
 
           // Cleanup session
-          try {
-            await client.killSubagent(agent?.sessionKey ? String(agent.sessionKey) : sessionKey);
-          } catch {}
+          try { await client.killSubagent(agentKey); } catch {}
           activeStepSessions.delete(task.id);
 
           return { executed: true, taskId: task.id };
         }
 
         if (agent.status === 'failed' || agent.status === 'error') {
+          inlineWatchedTasks.delete(task.id);
           handleStepFailure(task.id, 'Agent failed');
           try { await client.killSubagent(String(agent.sessionKey || sessionKey)); } catch {}
           activeStepSessions.delete(task.id);
@@ -333,8 +346,9 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
       }
 
       // Timeout
+      inlineWatchedTasks.delete(task.id);
       console.warn(`[WorkflowEngine] Step "${step.name}" timed out after 5 minutes`);
-      handleStepCompletion(task.id, 'Agent timed out after 5 minutes');
+      await handleStepCompletion(task.id, 'Agent timed out after 5 minutes');
       return { executed: true, taskId: task.id };
     } catch (err) {
       console.error(`[WorkflowEngine] Failed to execute step "${step.name}":`, err);
@@ -596,14 +610,14 @@ async function watchStepCompletion(
       if (!agent) {
         // Session gone — try history extraction one last time
         let output = await extractSessionOutput(client, sessionKey);
-        handleStepCompletion(taskId, output || 'Agent completed (session ended)');
+        await handleStepCompletion(taskId, output || 'Agent completed (session ended)');
         return;
       }
 
       if (agent.status === 'done' || agent.status === 'completed') {
         // Extract output from history while session still exists
         let output = await extractSessionOutput(client, String(agent.sessionKey || sessionKey));
-        handleStepCompletion(taskId, output || 'Agent completed successfully');
+        await handleStepCompletion(taskId, output || 'Agent completed successfully');
 
         // Clean up
         try { await client.killSubagent(String(agent.sessionKey || sessionKey)); } catch {}
@@ -624,7 +638,7 @@ async function watchStepCompletion(
 
   // Timeout
   console.warn(`[WorkflowEngine] Step watcher timed out for task ${taskId}`);
-  handleStepCompletion(taskId, 'Agent timed out after 5 minutes');
+  await handleStepCompletion(taskId, 'Agent timed out after 5 minutes');
 }
 
 async function extractSessionOutput(client: ReturnType<typeof getOpenClawClient>, sessionKey: string): Promise<string> {
@@ -699,6 +713,12 @@ async function pollActiveSteps(): Promise<void> {
 
     const entries = Array.from(activeStepSessions.entries());
     for (const [taskId, sessionKey] of entries) {
+      // Skip tasks that have an active inline watcher (inside /execute endpoint)
+      // The inline watcher is authoritative — it has better timing for output extraction
+      if (inlineWatchedTasks.has(taskId)) {
+        continue;
+      }
+
       // Find this session in the sub-agents list
       const agent = subagents.find(
         (a) => a.sessionKey === sessionKey || a.label === sessionKey
@@ -742,7 +762,7 @@ async function pollActiveSteps(): Promise<void> {
             // History truly unavailable
           }
 
-          handleStepCompletion(taskId, output || 'Agent completed (output not available — session was cleaned up before extraction)');
+          await handleStepCompletion(taskId, output || 'Agent completed (output not available — session was cleaned up before extraction)');
         }
         continue;
       }
@@ -778,7 +798,7 @@ async function pollActiveSteps(): Promise<void> {
         }
 
         console.log(`[WorkflowEngine] Extracted output for ${taskId}: ${output.length} chars, first 100: ${output.slice(0, 100)}`);
-        handleStepCompletion(taskId, output || 'Agent completed successfully (no text output captured)');
+        await handleStepCompletion(taskId, output || 'Agent completed successfully (no text output captured)');
 
         // Clean up the session now that we've extracted the output
         try {
@@ -800,7 +820,7 @@ async function pollActiveSteps(): Promise<void> {
   }
 }
 
-function handleStepCompletion(taskId: string, output: string): void {
+async function handleStepCompletion(taskId: string, output: string): Promise<void> {
   activeStepSessions.delete(taskId);
 
   const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
@@ -845,10 +865,10 @@ function handleStepCompletion(taskId: string, output: string): void {
     }
   }
 
-  // Mark done and advance — chain next step directly (we're already inside /execute context)
+  // Mark done and advance — chain next step (awaited so /execute stays alive)
   updateTaskStatus(taskId, 'done');
   if (task.workflow_run_id) {
-    onStepCompleted(taskId);
+    await onStepCompleted(taskId);
   }
 }
 
