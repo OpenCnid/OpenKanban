@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Check, X, Clock, ChevronDown, ChevronUp, GitBranch } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Check, X, Clock, ChevronDown, ChevronUp, GitBranch, FileText, Loader2 } from 'lucide-react';
 import type { Approval } from '@/lib/types';
 
 interface ApprovalWithJoins extends Approval {
@@ -29,9 +29,23 @@ function timeAgo(dateStr: string): string {
 }
 
 export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(approval.status === 'pending');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
+  const [deliverables, setDeliverables] = useState<Array<{ title: string; description?: string }>>([]);
+  const [loadingDeliverables, setLoadingDeliverables] = useState(false);
+
+  // Fetch deliverables when expanded (to show agent output)
+  useEffect(() => {
+    if (expanded && approval.source_task_id && deliverables.length === 0) {
+      setLoadingDeliverables(true);
+      fetch(`/api/tasks/${approval.source_task_id}/deliverables`)
+        .then(r => r.ok ? r.json() : [])
+        .then(d => setDeliverables(Array.isArray(d) ? d : []))
+        .catch(() => {})
+        .finally(() => setLoadingDeliverables(false));
+    }
+  }, [expanded, approval.source_task_id, deliverables.length]);
 
   const isPending = approval.status === 'pending';
   const statusColor = {
@@ -113,6 +127,26 @@ export function ApprovalCard({ approval, onApprove, onReject }: ApprovalCardProp
           {approval.description && (
             <p className="text-sm text-mc-text-secondary mb-3">{approval.description}</p>
           )}
+
+          {/* Agent output from deliverables */}
+          {loadingDeliverables && (
+            <div className="flex items-center gap-2 text-sm text-mc-text-secondary mb-3">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading agent output...
+            </div>
+          )}
+          {deliverables.map((d, i) => (
+            <div key={i} className="bg-mc-bg rounded-lg border border-mc-border/30 p-4 mb-3">
+              <div className="flex items-center gap-2 mb-2">
+                <FileText className="w-4 h-4 text-mc-accent" />
+                <span className="text-xs font-medium text-mc-text">{d.title}</span>
+              </div>
+              {d.description && (
+                <div className="text-sm text-mc-text-secondary whitespace-pre-wrap leading-relaxed max-h-[400px] overflow-y-auto">
+                  {d.description}
+                </div>
+              )}
+            </div>
+          ))}
 
           {approval.content && (
             <div className="bg-mc-bg rounded-md p-3 mb-3 text-sm font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">

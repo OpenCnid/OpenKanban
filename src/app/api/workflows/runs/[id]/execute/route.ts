@@ -1,51 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryOne } from '@/lib/db';
-import { executeNextStep } from '@/lib/workflow-engine';
-import type { WorkflowRun } from '@/lib/types';
+import { executeNextStep, startCompletionPoller } from '@/lib/workflow-engine';
+
+startCompletionPoller();
 
 /**
  * POST /api/workflows/runs/[id]/execute
- * Start or resume execution of a workflow run.
- * Kicks off the next ready step via the workflow engine.
+ * Execute the next step of a workflow run. This is a long-running request —
+ * it blocks until the sub-agent completes (up to 5 minutes).
+ *
+ * Called by the client-side after creating a run, or by the workflow engine
+ * itself to chain steps.
  */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id: runId } = await params;
+
   try {
-    const { id } = await params;
-
-    const workflowRun = queryOne<WorkflowRun>(
-      'SELECT * FROM workflow_runs WHERE id = ?',
-      [id]
-    );
-
-    if (!workflowRun) {
-      return NextResponse.json({ error: 'Run not found' }, { status: 404 });
-    }
-
-    if (workflowRun.status !== 'running' && workflowRun.status !== 'paused') {
-      return NextResponse.json(
-        { error: `Run is ${workflowRun.status}, cannot execute` },
-        { status: 400 }
-      );
-    }
-
-    const result = await executeNextStep(id);
-
-    if (result.error) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
-    }
-
-    return NextResponse.json({
-      executed: result.executed,
-      task_id: result.taskId || null,
-      message: result.executed
-        ? `Step started (task: ${result.taskId})`
-        : 'No steps ready to execute',
-    });
+    const result = await executeNextStep(runId);
+    return NextResponse.json(result);
   } catch (error) {
-    console.error('Failed to execute workflow run:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error(`[Execute] Failed for run ${runId}:`, error);
+    return NextResponse.json(
+      { error: 'Step execution failed', detail: String(error) },
+      { status: 500 }
+    );
   }
 }

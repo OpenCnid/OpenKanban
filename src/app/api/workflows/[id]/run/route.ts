@@ -118,14 +118,8 @@ export async function POST(
       }
     }
 
-    // Auto-execute first step if auto_execute is not explicitly false
-    const autoExecute = body.auto_execute !== false;
-    if (autoExecute) {
-      // Execute asynchronously — don't block the response
-      executeNextStep(result.runId).catch(err => {
-        console.error(`[WorkflowRun] Auto-execute failed for run ${result.runId}:`, err);
-      });
-    }
+    // Return the run ID — client is responsible for calling /execute
+    // to start step execution. This avoids Next.js killing fire-and-forget async.
 
     return NextResponse.json({
       id: result.runId,

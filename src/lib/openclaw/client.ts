@@ -746,13 +746,31 @@ let clientInstance: OpenClawClient | null = null;
 export function getOpenClawClient(): OpenClawClient {
   if (!clientInstance) {
     clientInstance = new OpenClawClient();
-    // Start the workflow completion poller when client is first created
+
+    // Start the workflow completion poller
     try {
       const { startCompletionPoller } = require('../workflow-engine');
       startCompletionPoller();
     } catch {
       // workflow-engine may not be loaded yet on first import
     }
+
+    // Listen for sub-agent completion events on the WebSocket
+    clientInstance.on('notification', (data: Record<string, unknown>) => {
+      // OpenClaw sends notifications when sub-agents complete
+      const method = data.method as string;
+      if (method === 'sessions.completed' || method === 'subagent.completed') {
+        const params = data.params as Record<string, unknown>;
+        const sessionKey = params?.sessionKey as string;
+        const label = params?.label as string;
+        if (sessionKey || label) {
+          try {
+            const { handleSubagentCompletion } = require('../workflow-engine');
+            handleSubagentCompletion(sessionKey || label);
+          } catch {}
+        }
+      }
+    });
   }
   return clientInstance;
 }

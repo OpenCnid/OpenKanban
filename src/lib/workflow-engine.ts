@@ -259,27 +259,82 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
       }
 
       const label = `wf-${runId.slice(0, 8)}-step${stepIndex}`;
+
+      // Update task description with label
+      run(
+        'UPDATE tasks SET description = ? WHERE id = ?',
+        [`Step ${stepIndex + 1} of workflow "${template.name}" [label: ${label}]`, task.id]
+      );
+
+      // Spawn the sub-agent (fire-and-forget — OpenClaw always returns immediately)
       const result = await client.spawnSession({
         task: prompt,
         label,
         model: 'anthropic/claude-sonnet-4-6',
-        cleanup: 'keep', // Keep so poller can detect completion; poller cleans up after
+        cleanup: 'keep', // Keep so we can read history after completion
         runTimeoutSeconds: 300,
       });
 
-      // Track the session for the completion poller
       const sessionKey = result.sessionKey || label;
       activeStepSessions.set(task.id, sessionKey);
-      console.log(`[WorkflowEngine] Tracking session: ${sessionKey} for task ${task.id} (total tracked: ${activeStepSessions.size})`);
 
-      // Store session key in task metadata
+      // Update task with session key
       run(
         'UPDATE tasks SET description = ? WHERE id = ?',
-        [`Step ${stepIndex + 1} of workflow "${template.name}" [session: ${result.sessionKey || label}]`, task.id]
+        [`Step ${stepIndex + 1} of workflow "${template.name}" [session: ${sessionKey}]`, task.id]
       );
 
-      console.log(`[WorkflowEngine] Step "${step.name}" executing (task: ${task.id}, session: ${result.sessionKey || label})`);
+      console.log(`[WorkflowEngine] Step "${step.name}" spawned — session: ${sessionKey}`);
 
+      // Poll until the sub-agent completes, then extract output
+      // This runs inside the /execute endpoint which has its own HTTP request context
+      const maxWait = 300000; // 5 min
+      const pollMs = 4000;
+      const start = Date.now();
+
+      while (Date.now() - start < maxWait) {
+        await new Promise(r => setTimeout(r, pollMs));
+
+        // Check task hasn't been cancelled
+        const freshTask = queryOne<Task>('SELECT status FROM tasks WHERE id = ?', [task.id]);
+        if (!freshTask || freshTask.status !== 'in_progress') {
+          console.log(`[WorkflowEngine] Task ${task.id} no longer in_progress (${freshTask?.status}), stopping`);
+          return { executed: true, taskId: task.id };
+        }
+
+        // Check sub-agent status
+        const agents = await client.listSubagents({ recentMinutes: 10 });
+        const agent = agents.find((a: Record<string, unknown>) =>
+          a.sessionKey === sessionKey || a.label === sessionKey
+        ) as Record<string, unknown> | undefined;
+
+        if (!agent || agent.status === 'done' || agent.status === 'completed') {
+          // Agent finished — extract output from history
+          const output = await extractSessionOutput(client, agent?.sessionKey ? String(agent.sessionKey) : sessionKey);
+          console.log(`[WorkflowEngine] Step "${step.name}" done — output: ${output.length} chars`);
+
+          handleStepCompletion(task.id, output.slice(0, 5000) || 'Agent completed successfully');
+
+          // Cleanup session
+          try {
+            await client.killSubagent(agent?.sessionKey ? String(agent.sessionKey) : sessionKey);
+          } catch {}
+          activeStepSessions.delete(task.id);
+
+          return { executed: true, taskId: task.id };
+        }
+
+        if (agent.status === 'failed' || agent.status === 'error') {
+          handleStepFailure(task.id, 'Agent failed');
+          try { await client.killSubagent(String(agent.sessionKey || sessionKey)); } catch {}
+          activeStepSessions.delete(task.id);
+          return { executed: true, taskId: task.id };
+        }
+      }
+
+      // Timeout
+      console.warn(`[WorkflowEngine] Step "${step.name}" timed out after 5 minutes`);
+      handleStepCompletion(task.id, 'Agent timed out after 5 minutes');
       return { executed: true, taskId: task.id };
     } catch (err) {
       console.error(`[WorkflowEngine] Failed to execute step "${step.name}":`, err);
@@ -362,9 +417,7 @@ export function onStepReview(taskId: string, agentOutput?: string): void {
       approvalId,
       'step_review',
       `Review: ${task.title}`,
-      agentOutput
-        ? `Step "${task.title}" completed. Agent output:\n\n${agentOutput.slice(0, 2000)}`
-        : `Step "${task.title}" in pipeline "${template?.name || 'Unknown'}" requires your review before proceeding.`,
+      `Step "${task.title}" completed in pipeline "${template?.name || 'Unknown'}". Review the agent output below before approving.`,
       'workflow_engine',
       taskId,
       task.workflow_run_id,
@@ -513,7 +566,97 @@ export function getActiveSession(taskId: string): string | undefined {
 }
 
 // ============================================================
-// Sub-agent completion poller
+// Per-step completion watcher (more reliable than global poller)
+// ============================================================
+
+async function watchStepCompletion(
+  taskId: string,
+  sessionKey: string,
+  step: WorkflowStep,
+  template: WorkflowTemplate
+): Promise<void> {
+  const client = getOpenClawClient();
+  const maxWait = 300000; // 5 min max
+  const pollInterval = 4000; // Check every 4s
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWait) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+    // Check if task is still in_progress (might have been cancelled)
+    const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+    if (!task || task.status !== 'in_progress') return;
+
+    try {
+      const subagents = await client.listSubagents({ recentMinutes: 10 });
+      const agent = subagents.find((a: Record<string, unknown>) =>
+        a.sessionKey === sessionKey || a.label === sessionKey
+      ) as Record<string, unknown> | undefined;
+
+      if (!agent) {
+        // Session gone — try history extraction one last time
+        let output = await extractSessionOutput(client, sessionKey);
+        handleStepCompletion(taskId, output || 'Agent completed (session ended)');
+        return;
+      }
+
+      if (agent.status === 'done' || agent.status === 'completed') {
+        // Extract output from history while session still exists
+        let output = await extractSessionOutput(client, String(agent.sessionKey || sessionKey));
+        handleStepCompletion(taskId, output || 'Agent completed successfully');
+
+        // Clean up
+        try { await client.killSubagent(String(agent.sessionKey || sessionKey)); } catch {}
+        activeStepSessions.delete(taskId);
+        return;
+      }
+
+      if (agent.status === 'failed' || agent.status === 'error') {
+        handleStepFailure(taskId, 'Agent failed');
+        try { await client.killSubagent(String(agent.sessionKey || sessionKey)); } catch {}
+        activeStepSessions.delete(taskId);
+        return;
+      }
+    } catch {
+      // Network error — retry
+    }
+  }
+
+  // Timeout
+  console.warn(`[WorkflowEngine] Step watcher timed out for task ${taskId}`);
+  handleStepCompletion(taskId, 'Agent timed out after 5 minutes');
+}
+
+async function extractSessionOutput(client: ReturnType<typeof getOpenClawClient>, sessionKey: string): Promise<string> {
+  try {
+    const history = await client.getSubagentHistory(sessionKey, { limit: 5, includeTools: true }) as Array<{
+      role?: string;
+      content?: string | Array<{ type: string; text?: string; thinking?: string }>;
+    }>;
+
+    // Walk backwards through messages looking for the last assistant text
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i];
+      if (msg.role !== 'assistant') continue;
+
+      if (typeof msg.content === 'string' && msg.content.length > 10) {
+        return msg.content.slice(0, 5000);
+      }
+      if (Array.isArray(msg.content)) {
+        const textBlocks = msg.content.filter(b => b.type === 'text' && b.text);
+        if (textBlocks.length > 0) {
+          return textBlocks.map(b => b.text).join('\n').slice(0, 5000);
+        }
+      }
+    }
+  } catch {
+    // History unavailable
+  }
+  return '';
+}
+
+// ============================================================
+// Global completion poller (backup — catches missed steps)
 // ============================================================
 // sessions_spawn is fire-and-forget. This poller checks active
 // sub-agent sessions and marks tasks done when they complete.
@@ -523,6 +666,22 @@ const GLOBAL_POLLER_KEY = '__wf_completion_poller__';
 const POLL_INTERVAL_MS = 5000;
 
 async function pollActiveSteps(): Promise<void> {
+  // Check for in_progress workflow tasks in DB — don't rely solely on in-memory Map
+  const inProgressTasks = queryAll<Task & { workflow_run_id: string }>(
+    `SELECT * FROM tasks WHERE status = 'in_progress' AND workflow_run_id IS NOT NULL`
+  );
+
+  // Sync DB state into activeStepSessions (handles HMR reloads losing in-memory state)
+  for (const task of inProgressTasks) {
+    if (!activeStepSessions.has(task.id)) {
+      // Extract session key from description: "Step N of ... [session: xxx]"
+      const match = task.description?.match(/\[session:\s*([^\]]+)\]/);
+      if (match) {
+        activeStepSessions.set(task.id, match[1]);
+      }
+    }
+  }
+
   if (activeStepSessions.size === 0) return;
 
   try {
@@ -555,11 +714,35 @@ async function pollActiveSteps(): Promise<void> {
         }
 
         // If the task has been in_progress for > 15s and the session is gone,
-        // it probably completed and was cleaned up
+        // try to extract output before giving up
         const elapsed = Date.now() - new Date(task.updated_at).getTime();
         if (elapsed > 15000) {
-          console.log(`[WorkflowEngine] Session ${sessionKey} for task ${taskId} not found — assuming completed`);
-          handleStepCompletion(taskId, 'Sub-agent session completed (session cleaned up)');
+          console.log(`[WorkflowEngine] Session ${sessionKey} for task ${taskId} not found — attempting history extraction`);
+
+          let output = '';
+          try {
+            // Try fetching history — session might still exist even if not in subagents list
+            const history = await client.getSubagentHistory(sessionKey, { limit: 5, includeTools: true }) as Array<{
+              role?: string;
+              content?: string | Array<{ type: string; text?: string }>;
+            }>;
+            const lastAssistant = history?.filter((m) => m.role === 'assistant').pop();
+            if (lastAssistant?.content) {
+              if (typeof lastAssistant.content === 'string') {
+                output = lastAssistant.content.slice(0, 5000);
+              } else if (Array.isArray(lastAssistant.content)) {
+                output = lastAssistant.content
+                  .filter((b) => b.type === 'text' && b.text)
+                  .map((b) => b.text)
+                  .join('\n')
+                  .slice(0, 5000);
+              }
+            }
+          } catch {
+            // History truly unavailable
+          }
+
+          handleStepCompletion(taskId, output || 'Agent completed (output not available — session was cleaned up before extraction)');
         }
         continue;
       }
@@ -662,9 +845,11 @@ function handleStepCompletion(taskId: string, output: string): void {
     }
   }
 
-  // Mark done and advance pipeline
+  // Mark done and advance — chain next step directly (we're already inside /execute context)
   updateTaskStatus(taskId, 'done');
-  onStepCompleted(taskId);
+  if (task.workflow_run_id) {
+    onStepCompleted(taskId);
+  }
 }
 
 function handleStepFailure(taskId: string, error: string): void {

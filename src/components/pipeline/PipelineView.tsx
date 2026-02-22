@@ -161,6 +161,11 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
           console.error('Failed to trigger run:', await res.text());
           return;
         }
+        // Start step execution (separate request so it doesn't get killed)
+        const data = await res.clone().json();
+        if (data.id) {
+          fetch(`/api/workflows/runs/${data.id}/execute`, { method: 'POST' }).catch(() => {});
+        }
       } else {
         // Freeform trigger — route through semantic router
         const res = await fetch('/api/workflows/trigger', {
@@ -175,6 +180,10 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         if (!res.ok) {
           console.error('Failed to trigger:', await res.text());
           return;
+        }
+        const triggerData = await res.json();
+        if (triggerData.run_id) {
+          fetch(`/api/workflows/runs/${triggerData.run_id}/execute`, { method: 'POST' }).catch(() => {});
         }
       }
 
