@@ -78,14 +78,15 @@ const KNOWN_SKILLS: SkillDefinition[] = [
 // --- Core Functions ---
 
 /**
- * Scan for SKILL.md files in common OpenClaw skill locations.
+ * Scan for SKILL.md files in workspace-local skill directories only.
+ * Does NOT import OpenClaw's global built-in skills (those are utility
+ * skills like 1Password, Spotify, etc. — not workflow templates).
+ * Only workspace-local custom skills are candidates for auto-import.
  */
-function discoverSkillPaths(): string[] {
+function discoverWorkspaceSkillPaths(): string[] {
   const paths: string[] = [];
   const searchDirs = [
-    // Global npm skills
-    path.join(process.env.HOME || '/home/molt', '.npm-global/lib/node_modules/openclaw/skills'),
-    // Workspace skills
+    // Workspace skills only — user/project-specific
     path.join(process.env.HOME || '/home/molt', 'clawd/skills'),
   ];
 
@@ -171,11 +172,11 @@ function parseSkillMd(filePath: string): SkillDefinition | null {
 export function importSkills(workspaceId: string = 'default'): ImportResult {
   const result: ImportResult = { imported: 0, updated: 0, skipped: 0, errors: [], details: [] };
 
-  // Start with known skills
+  // Start with known workflow-relevant skills
   const allSkills: SkillDefinition[] = [...KNOWN_SKILLS];
 
-  // Discover additional skills from filesystem
-  const discoveredPaths = discoverSkillPaths();
+  // Only discover workspace-local custom skills (not OpenClaw's global built-ins)
+  const discoveredPaths = discoverWorkspaceSkillPaths();
   for (const skillPath of discoveredPaths) {
     const dirName = path.basename(path.dirname(skillPath));
     // Skip if already covered by known skills
@@ -256,4 +257,34 @@ export function getSkillTemplates(workspaceId: string = 'default'): WorkflowTemp
     "SELECT * FROM workflow_templates WHERE origin = 'skill' AND workspace_id = ?",
     [workspaceId]
   );
+}
+
+/**
+ * Remove skill-backed templates that are no longer in the known skills list
+ * or workspace skills directory. Cleans up stale imports.
+ */
+export function pruneStaleSkillTemplates(workspaceId: string = 'default'): number {
+  const validNames = new Set(KNOWN_SKILLS.map(s => s.name));
+
+  // Also include workspace-discovered skill names
+  const discoveredPaths = discoverWorkspaceSkillPaths();
+  for (const skillPath of discoveredPaths) {
+    const parsed = parseSkillMd(skillPath);
+    if (parsed) validNames.add(parsed.name);
+  }
+
+  const existing = queryAll<{ id: string; name: string }>(
+    "SELECT id, name FROM workflow_templates WHERE origin = 'skill' AND workspace_id = ?",
+    [workspaceId]
+  );
+
+  let pruned = 0;
+  for (const t of existing) {
+    if (!validNames.has(t.name)) {
+      run('DELETE FROM workflow_templates WHERE id = ?', [t.id]);
+      pruned++;
+    }
+  }
+
+  return pruned;
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { importSkills, getSkillTemplates } from '@/lib/skill-bridge';
+import { importSkills, getSkillTemplates, pruneStaleSkillTemplates } from '@/lib/skill-bridge';
 
 // POST /api/workflows/import-skills — scan and import skills as templates
 export async function POST(request: NextRequest) {
@@ -7,8 +7,10 @@ export async function POST(request: NextRequest) {
   const workspaceId = body.workspace_id || 'default';
 
   try {
+    // First prune any stale skill templates (from previous over-broad imports)
+    const pruned = pruneStaleSkillTemplates(workspaceId);
     const result = importSkills(workspaceId);
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, pruned });
   } catch (err) {
     console.error('[SkillBridge] Import failed:', err);
     return NextResponse.json(
