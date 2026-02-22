@@ -39,7 +39,8 @@ export async function POST(request: NextRequest) {
       const result = await client.spawnSession({
         task: message.trim(),
         label: `openkanban-chat-${Date.now()}`,
-        cleanup: 'keep', // Keep session alive for follow-up messages
+        model: 'anthropic/claude-sonnet-4-6',
+        cleanup: 'keep',
         timeoutSeconds: 60,
       });
 

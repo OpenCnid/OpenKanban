@@ -256,8 +256,9 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
       const result = await client.spawnSession({
         task: prompt,
         label,
-        cleanup: 'delete', // Clean up session after step completes
-        runTimeoutSeconds: 300, // 5 min timeout per step
+        model: 'anthropic/claude-sonnet-4-6',
+        cleanup: 'delete',
+        runTimeoutSeconds: 300,
       });
 
       // Track the session
