@@ -12,6 +12,8 @@ import { SSEDebugPanel } from '@/components/SSEDebugPanel';
 import { PipelineView } from '@/components/pipeline/PipelineView';
 import { ApprovalsList } from '@/components/approvals/ApprovalsList';
 import { DashboardHome } from '@/components/dashboard/DashboardHome';
+import { MemoryBrowser } from '@/components/memory/MemoryBrowser';
+import { GlobalSearch } from '@/components/search/GlobalSearch';
 import { useMissionControl } from '@/lib/store';
 import { useSSE } from '@/hooks/useSSE';
 import { debug } from '@/lib/debug';
@@ -232,7 +234,7 @@ export default function WorkspacePage() {
 
   return (
     <div className="h-screen flex flex-col bg-mc-bg overflow-hidden">
-      <Header workspace={workspace} />
+      <Header workspace={workspace} onNavigate={(tab) => setTab(tab as TabId)} />
 
       {/* Tab Navigation */}
       <div className="flex items-center gap-1 px-4 border-b border-mc-border bg-mc-bg-secondary">
@@ -285,12 +287,7 @@ export default function WorkspacePage() {
           />
         )}
         {activeTab === 'memory' && (
-          <div className="flex-1 flex items-center justify-center text-mc-text-secondary">
-            <div className="text-center">
-              <Brain className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="text-lg font-medium">Memory browser coming soon.</p>
-            </div>
-          </div>
+          <MemoryBrowser workspaceId={workspace.id} />
         )}
 
         {/* Live Feed */}
@@ -299,6 +296,9 @@ export default function WorkspacePage() {
 
       {/* Debug Panel - only shows when debug mode enabled */}
       <SSEDebugPanel />
+
+      {/* Global Search (Cmd+K) */}
+      <GlobalSearch onNavigate={(tab) => setTab(tab as TabId)} />
     </div>
   );
 }

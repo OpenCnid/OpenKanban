@@ -612,6 +612,42 @@ export class OpenClawClient extends EventEmitter {
     await this.invokeToolHttp('cron', { action: 'update', jobId, patch });
   }
 
+  // Memory methods (proxied through OpenClaw's Mem0 integration)
+
+  async searchMemory(query: string, params?: { limit?: number; scope?: 'session' | 'long-term' | 'all' }): Promise<unknown[]> {
+    const result = await this.invokeToolHttp<unknown>('memory_search', { query, ...params });
+    // Tool returns { memories: [...] } or array directly
+    if (Array.isArray(result)) return result;
+    if (result && typeof result === 'object' && 'memories' in (result as Record<string, unknown>)) {
+      return (result as Record<string, unknown>).memories as unknown[];
+    }
+    if (result && typeof result === 'object' && 'results' in (result as Record<string, unknown>)) {
+      return (result as Record<string, unknown>).results as unknown[];
+    }
+    return [];
+  }
+
+  async listMemories(params?: { scope?: 'session' | 'long-term' | 'all' }): Promise<unknown[]> {
+    const result = await this.invokeToolHttp<unknown>('memory_list', { ...params });
+    if (Array.isArray(result)) return result;
+    if (result && typeof result === 'object' && 'memories' in (result as Record<string, unknown>)) {
+      return (result as Record<string, unknown>).memories as unknown[];
+    }
+    return [];
+  }
+
+  async getMemory(memoryId: string): Promise<unknown> {
+    return this.invokeToolHttp('memory_get', { memoryId });
+  }
+
+  async storeMemory(text: string, params?: { longTerm?: boolean; metadata?: Record<string, unknown> }): Promise<unknown> {
+    return this.invokeToolHttp('memory_store', { text, ...params });
+  }
+
+  async deleteMemory(params: { memoryId?: string; query?: string }): Promise<unknown> {
+    return this.invokeToolHttp('memory_forget', params);
+  }
+
   // Agent methods
   async listAgents(): Promise<unknown[]> {
     const result = await this.call<{ agents?: unknown[] }>('agents_list');

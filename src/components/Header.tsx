@@ -3,16 +3,18 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Zap, Settings, ChevronLeft, LayoutGrid } from 'lucide-react';
+import { Zap, Settings, ChevronLeft, LayoutGrid, Search } from 'lucide-react';
 import { useMissionControl } from '@/lib/store';
 import { format } from 'date-fns';
+import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import type { Workspace } from '@/lib/types';
 
 interface HeaderProps {
   workspace?: Workspace;
+  onNavigate?: (tab: string) => void;
 }
 
-export function Header({ workspace }: HeaderProps) {
+export function Header({ workspace, onNavigate }: HeaderProps) {
   const router = useRouter();
   const { agents, tasks, isOnline } = useMissionControl();
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -100,8 +102,26 @@ export function Header({ workspace }: HeaderProps) {
         </div>
       )}
 
-      {/* Right: Time & Status */}
-      <div className="flex items-center gap-4">
+      {/* Right: Search, Notifications, Time & Status */}
+      <div className="flex items-center gap-3">
+        {/* Cmd+K search trigger */}
+        {workspace && (
+          <button
+            onClick={() => {
+              // Dispatch Cmd+K
+              document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
+            }}
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-mc-bg-tertiary border border-mc-border rounded-lg text-xs text-mc-text-secondary hover:text-mc-text hover:border-mc-accent/30 transition-colors"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span>Search</span>
+            <kbd className="ml-1 px-1 py-0.5 text-[10px] bg-mc-bg border border-mc-border rounded">⌘K</kbd>
+          </button>
+        )}
+
+        {/* Notification Center */}
+        {workspace && <NotificationCenter onNavigate={onNavigate} />}
+
         <span className="text-mc-text-secondary text-sm font-mono">
           {format(currentTime, 'HH:mm:ss')}
         </span>
