@@ -241,8 +241,15 @@ export function MemoryBrowser({ workspaceId }: MemoryBrowserProps) {
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Brain className="w-10 h-10 text-mc-text-secondary/30 mb-3" />
             <p className="text-sm text-mc-text-secondary">
-              {activeSearch ? 'No memories match your search.' : 'No memories stored yet.'}
+              {activeSearch
+                ? 'No memories match your search.'
+                : 'No memories stored yet.'}
             </p>
+            {!activeSearch && (
+              <p className="text-xs text-mc-text-secondary/60 mt-1 max-w-sm">
+                Memories are created as the agent learns about you and your workflows. You can also add them manually.
+              </p>
+            )}
             {activeSearch && (
               <button
                 onClick={clearSearch}
