@@ -34,6 +34,35 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
 
   const { workflowRuns, tasks, setWorkflowRuns } = useMissionControl();
 
+  // SSE-driven refresh — re-fetch runs + tasks when step/run events arrive
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+      const type = detail.type || '';
+      // Refresh on workflow-related events
+      if (type.includes('task') || type.includes('workflow') || type.includes('step') || type.includes('approval')) {
+        refreshData();
+      }
+    };
+
+    const refreshData = async () => {
+      try {
+        const [runsRes, tasksRes] = await Promise.all([
+          fetch(`/api/workflows/runs?workspace_id=${workspaceId}`),
+          fetch(`/api/tasks?workspace_id=${workspaceId}`),
+        ]);
+        if (runsRes.ok) setWorkflowRuns(await runsRes.json());
+        if (tasksRes.ok) useMissionControl.getState().setTasks(await tasksRes.json());
+      } catch {
+        // Silent
+      }
+    };
+
+    window.addEventListener('sse-event', handler);
+    return () => window.removeEventListener('sse-event', handler);
+  }, [workspaceId, setWorkflowRuns]);
+
   // Build PipelineRunData from real workflow runs + their tasks
   const pipelineRuns = useMemo((): PipelineRunData[] => {
     return workflowRuns.map((run) => {

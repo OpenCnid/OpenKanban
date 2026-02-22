@@ -62,6 +62,19 @@ export default function WorkspacePage() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [activePipelines, setActivePipelines] = useState(0);
+
+  // Compute active pipeline count from store
+  useEffect(() => {
+    const runs = useMissionControl.getState().workflowRuns;
+    setActivePipelines(runs.filter(r => r.status === 'running' || r.status === 'paused').length);
+
+    // Subscribe to store changes
+    const unsub = useMissionControl.subscribe((state) => {
+      setActivePipelines(state.workflowRuns.filter(r => r.status === 'running' || r.status === 'paused').length);
+    });
+    return unsub;
+  }, []);
 
   // Connect to SSE for real-time updates
   useSSE();
@@ -258,6 +271,11 @@ export default function WorkspacePage() {
             >
               <Icon className="w-4 h-4" />
               {tab.label}
+              {tab.id === 'pipelines' && activePipelines > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-teal-500/20 text-teal-400 rounded-full leading-none">
+                  {activePipelines}
+                </span>
+              )}
               {tab.id === 'approvals' && pendingApprovals > 0 && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-400 rounded-full leading-none">
                   {pendingApprovals}
