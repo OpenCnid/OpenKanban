@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   planning_spec TEXT,
   planning_agents TEXT,
   planning_dispatch_error TEXT,
+  workflow_run_id TEXT REFERENCES workflow_runs(id),
+  workflow_step_index INTEGER,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -168,6 +170,101 @@ CREATE TABLE IF NOT EXISTS task_deliverables (
   title TEXT NOT NULL,
   path TEXT,
   description TEXT,
+  is_input INTEGER DEFAULT 0,
+  source_task_id TEXT REFERENCES tasks(id),
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Workflow templates
+CREATE TABLE IF NOT EXISTS workflow_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  trigger_type TEXT NOT NULL DEFAULT 'manual',
+  trigger_config TEXT,
+  steps TEXT NOT NULL,
+  workspace_id TEXT DEFAULT 'default' REFERENCES workspaces(id),
+  icon TEXT DEFAULT '⚡',
+  enabled INTEGER DEFAULT 1,
+  origin TEXT DEFAULT 'manual',
+  status TEXT DEFAULT 'active',
+  success_rate REAL,
+  total_runs INTEGER DEFAULT 0,
+  retrieval_count INTEGER DEFAULT 0,
+  last_used_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Workflow runs (instances of a template)
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id TEXT PRIMARY KEY,
+  template_id TEXT REFERENCES workflow_templates(id),
+  name TEXT NOT NULL,
+  status TEXT DEFAULT 'running',
+  trigger_input TEXT,
+  trigger_method TEXT,
+  workspace_id TEXT DEFAULT 'default' REFERENCES workspaces(id),
+  outcome TEXT,
+  approval_count INTEGER DEFAULT 0,
+  rejection_count INTEGER DEFAULT 0,
+  duration_seconds INTEGER,
+  started_at TEXT DEFAULT (datetime('now')),
+  completed_at TEXT,
+  metadata TEXT
+);
+
+-- Task dependencies (links tasks in a pipeline)
+CREATE TABLE IF NOT EXISTS task_dependencies (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  depends_on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  dependency_type TEXT DEFAULT 'finish_to_start',
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(task_id, depends_on_task_id)
+);
+
+-- Approvals
+CREATE TABLE IF NOT EXISTS approvals (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  content TEXT,
+  source TEXT,
+  source_task_id TEXT REFERENCES tasks(id),
+  workflow_run_id TEXT REFERENCES workflow_runs(id),
+  status TEXT DEFAULT 'pending',
+  resolved_at TEXT,
+  resolution_notes TEXT,
+  metadata TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Notifications
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT,
+  link TEXT,
+  read INTEGER DEFAULT 0,
+  source_id TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Inbound alerts (webhook endpoint for external tools)
+CREATE TABLE IF NOT EXISTS alerts (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  severity TEXT DEFAULT 'info',
+  title TEXT NOT NULL,
+  message TEXT,
+  product TEXT,
+  channel TEXT,
+  acknowledged INTEGER DEFAULT 0,
+  metadata TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -183,4 +280,12 @@ CREATE INDEX IF NOT EXISTS idx_activities_task ON task_activities(task_id, creat
 CREATE INDEX IF NOT EXISTS idx_deliverables_task ON task_deliverables(task_id);
 CREATE INDEX IF NOT EXISTS idx_openclaw_sessions_task ON openclaw_sessions(task_id);
 CREATE INDEX IF NOT EXISTS idx_planning_questions_task ON planning_questions(task_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_template ON workflow_runs(template_id);
+CREATE INDEX IF NOT EXISTS idx_deps_task ON task_dependencies(task_id);
+CREATE INDEX IF NOT EXISTS idx_deps_depends ON task_dependencies(depends_on_task_id);
+CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
+CREATE INDEX IF NOT EXISTS idx_notif_read ON notifications(read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity, acknowledged);
+CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at DESC);
 `;

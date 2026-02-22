@@ -64,6 +64,8 @@ export interface Task {
   workspace_id: string;
   business_id: string;
   due_date?: string;
+  workflow_run_id?: string;
+  workflow_step_index?: number;
   created_at: string;
   updated_at: string;
   // Joined fields
@@ -179,6 +181,8 @@ export interface TaskDeliverable {
   title: string;
   path?: string;
   description?: string;
+  is_input?: boolean;
+  source_task_id?: string;
   created_at: string;
 }
 
@@ -231,6 +235,112 @@ export interface PlanningState {
     percentage: number;
   };
   isLocked: boolean;
+}
+
+// Workflow types
+export type WorkflowTriggerType = 'manual' | 'webhook' | 'schedule' | 'event';
+export type WorkflowRunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+export type AlertSeverity = 'info' | 'warning' | 'critical';
+export type DependencyType = 'finish_to_start' | 'start_to_start' | 'finish_to_finish';
+
+export interface WorkflowStep {
+  name: string;
+  agent_role?: string;
+  tools?: string[];
+  depends_on?: string;
+  review?: boolean;
+  output?: string;
+  destinations?: string[];
+}
+
+export interface WorkflowTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  trigger_type: WorkflowTriggerType;
+  trigger_config?: string;
+  steps: WorkflowStep[];
+  workspace_id: string;
+  icon: string;
+  enabled: boolean;
+  origin: string;
+  status: string;
+  success_rate?: number;
+  total_runs: number;
+  retrieval_count: number;
+  last_used_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowRun {
+  id: string;
+  template_id: string;
+  name: string;
+  status: WorkflowRunStatus;
+  trigger_input?: string;
+  trigger_method?: string;
+  workspace_id: string;
+  outcome?: string;
+  approval_count: number;
+  rejection_count: number;
+  duration_seconds?: number;
+  started_at: string;
+  completed_at?: string;
+  metadata?: string;
+  // Joined fields
+  template?: WorkflowTemplate;
+  tasks?: Task[];
+}
+
+export interface TaskDependency {
+  id: string;
+  task_id: string;
+  depends_on_task_id: string;
+  dependency_type: DependencyType;
+  created_at: string;
+}
+
+export interface Approval {
+  id: string;
+  type: string;
+  title: string;
+  description?: string;
+  content?: string;
+  source?: string;
+  source_task_id?: string;
+  workflow_run_id?: string;
+  status: ApprovalStatus;
+  resolved_at?: string;
+  resolution_notes?: string;
+  metadata?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  message?: string;
+  link?: string;
+  read: boolean;
+  source_id?: string;
+  created_at: string;
+}
+
+export interface Alert {
+  id: string;
+  source: string;
+  severity: AlertSeverity;
+  title: string;
+  message?: string;
+  product?: string;
+  channel?: string;
+  acknowledged: boolean;
+  metadata?: Record<string, unknown>;
+  created_at: string;
 }
 
 // API request/response types
@@ -309,7 +419,13 @@ export type SSEEventType =
   | 'activity_logged'
   | 'deliverable_added'
   | 'agent_spawned'
-  | 'agent_completed';
+  | 'agent_completed'
+  | 'workflow_run_created'
+  | 'workflow_run_updated'
+  | 'approval_created'
+  | 'approval_updated'
+  | 'alert_created'
+  | 'notification_created';
 
 export interface SSEEvent {
   type: SSEEventType;

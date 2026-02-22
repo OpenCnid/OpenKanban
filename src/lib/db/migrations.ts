@@ -202,6 +202,154 @@ const migrations: Migration[] = [
         console.log('[Migration 007] Added gateway_agent_id to agents');
       }
     }
+  },
+  {
+    id: '008',
+    name: 'add_workflow_tables',
+    up: (db) => {
+      console.log('[Migration 008] Adding workflow tables...');
+
+      // Workflow templates
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS workflow_templates (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          trigger_type TEXT NOT NULL DEFAULT 'manual',
+          trigger_config TEXT,
+          steps TEXT NOT NULL,
+          workspace_id TEXT DEFAULT 'default' REFERENCES workspaces(id),
+          icon TEXT DEFAULT '⚡',
+          enabled INTEGER DEFAULT 1,
+          origin TEXT DEFAULT 'manual',
+          status TEXT DEFAULT 'active',
+          success_rate REAL,
+          total_runs INTEGER DEFAULT 0,
+          retrieval_count INTEGER DEFAULT 0,
+          last_used_at TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+
+      // Workflow runs
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS workflow_runs (
+          id TEXT PRIMARY KEY,
+          template_id TEXT REFERENCES workflow_templates(id),
+          name TEXT NOT NULL,
+          status TEXT DEFAULT 'running',
+          trigger_input TEXT,
+          trigger_method TEXT,
+          workspace_id TEXT DEFAULT 'default' REFERENCES workspaces(id),
+          outcome TEXT,
+          approval_count INTEGER DEFAULT 0,
+          rejection_count INTEGER DEFAULT 0,
+          duration_seconds INTEGER,
+          started_at TEXT DEFAULT (datetime('now')),
+          completed_at TEXT,
+          metadata TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status);
+        CREATE INDEX IF NOT EXISTS idx_runs_template ON workflow_runs(template_id);
+      `);
+
+      // Task dependencies
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS task_dependencies (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          depends_on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          dependency_type TEXT DEFAULT 'finish_to_start',
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(task_id, depends_on_task_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_deps_task ON task_dependencies(task_id);
+        CREATE INDEX IF NOT EXISTS idx_deps_depends ON task_dependencies(depends_on_task_id);
+      `);
+
+      // Approvals
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS approvals (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          content TEXT,
+          source TEXT,
+          source_task_id TEXT REFERENCES tasks(id),
+          workflow_run_id TEXT REFERENCES workflow_runs(id),
+          status TEXT DEFAULT 'pending',
+          resolved_at TEXT,
+          resolution_notes TEXT,
+          metadata TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
+      `);
+
+      // Notifications
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          message TEXT,
+          link TEXT,
+          read INTEGER DEFAULT 0,
+          source_id TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_notif_read ON notifications(read, created_at DESC);
+      `);
+
+      // Alerts
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS alerts (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          severity TEXT DEFAULT 'info',
+          title TEXT NOT NULL,
+          message TEXT,
+          product TEXT,
+          channel TEXT,
+          acknowledged INTEGER DEFAULT 0,
+          metadata TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity, acknowledged);
+        CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at DESC);
+      `);
+
+      // Add workflow columns to tasks table
+      const tasksInfo = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+
+      if (!tasksInfo.some(col => col.name === 'workflow_run_id')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN workflow_run_id TEXT REFERENCES workflow_runs(id)`);
+        console.log('[Migration 008] Added workflow_run_id to tasks');
+      }
+
+      if (!tasksInfo.some(col => col.name === 'workflow_step_index')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN workflow_step_index INTEGER`);
+        console.log('[Migration 008] Added workflow_step_index to tasks');
+      }
+
+      // Add workflow columns to task_deliverables table
+      const deliverablesInfo = db.prepare("PRAGMA table_info(task_deliverables)").all() as { name: string }[];
+
+      if (!deliverablesInfo.some(col => col.name === 'is_input')) {
+        db.exec(`ALTER TABLE task_deliverables ADD COLUMN is_input INTEGER DEFAULT 0`);
+        console.log('[Migration 008] Added is_input to task_deliverables');
+      }
+
+      if (!deliverablesInfo.some(col => col.name === 'source_task_id')) {
+        db.exec(`ALTER TABLE task_deliverables ADD COLUMN source_task_id TEXT REFERENCES tasks(id)`);
+        console.log('[Migration 008] Added source_task_id to task_deliverables');
+      }
+
+      console.log('[Migration 008] Workflow tables created');
+    }
   }
 ];
 
