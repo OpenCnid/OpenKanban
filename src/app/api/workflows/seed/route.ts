@@ -21,9 +21,9 @@ const EXAMPLE_TEMPLATES = [
     icon: '📈',
     trigger_type: 'manual',
     steps: [
-      { name: 'Market Data Pull', agent_role: 'data-fetcher' },
-      { name: 'Analysis', agent_role: 'analyst', depends_on: 'Market Data Pull', review: true },
-      { name: 'Log to Portfolio', agent_role: 'recorder', depends_on: 'Analysis' },
+      { name: 'Market Data Pull', agent_role: 'data-fetcher', agentId: 'market-data' },
+      { name: 'Analysis', agent_role: 'analyst', agentId: 'analyst', depends_on: 'Market Data Pull', review: true },
+      { name: 'Log to Portfolio', agent_role: 'recorder', agentId: 'recorder', depends_on: 'Analysis' },
     ],
   },
   {

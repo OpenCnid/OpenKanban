@@ -278,10 +278,12 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
       );
 
       // Spawn the sub-agent (fire-and-forget — OpenClaw always returns immediately)
+      // If step has an agentId, spawn under that specialist agent (uses its workspace, tools, model)
       const result = await client.spawnSession({
         task: prompt,
         label,
-        model: 'anthropic/claude-sonnet-4-6',
+        agentId: step.agentId || undefined,
+        model: step.model || (step.agentId ? undefined : 'anthropic/claude-sonnet-4-6'),
         cleanup: 'keep', // Keep so we can read history after completion
         runTimeoutSeconds: 300,
       });

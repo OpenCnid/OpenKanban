@@ -7,9 +7,17 @@ interface EditableStep {
   id: string;
   name: string;
   agent_role: string;
+  agentId: string;
   depends_on: string;
   review: boolean;
 }
+
+const AVAILABLE_AGENTS = [
+  { id: '', label: 'Default (no specialist)' },
+  { id: 'market-data', label: '📊 Market Data', description: 'Fetches prices, options, volume' },
+  { id: 'analyst', label: '🧠 Analyst', description: 'Trade analysis (Opus)' },
+  { id: 'recorder', label: '📝 Recorder', description: 'Logs results to files' },
+];
 
 interface WorkflowTemplateEditorProps {
   onClose: () => void;
@@ -20,6 +28,7 @@ interface WorkflowTemplateEditorProps {
     steps: Array<{
       name: string;
       agent_role?: string;
+      agentId?: string;
       depends_on?: string;
       review?: boolean;
     }>;
@@ -41,6 +50,7 @@ function newStep(overrides?: Partial<EditableStep>): EditableStep {
     id: `step-${Date.now()}-${stepCounter}`,
     name: '',
     agent_role: '',
+    agentId: '',
     depends_on: '',
     review: false,
     ...overrides,
@@ -112,6 +122,7 @@ export function WorkflowTemplateEditor({ onClose, onSave, initial }: WorkflowTem
         steps: steps.map(s => ({
           name: s.name.trim(),
           agent_role: s.agent_role.trim() || undefined,
+          agentId: s.agentId || undefined,
           depends_on: s.depends_on || undefined,
           review: s.review || undefined,
         })),
@@ -204,8 +215,12 @@ export function WorkflowTemplateEditor({ onClose, onSave, initial }: WorkflowTem
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
                     step.review
                       ? 'bg-amber-500/20 text-amber-400'
-                      : 'bg-mc-border/50 text-mc-text-secondary'
+                      : step.agentId
+                        ? 'bg-mc-accent/20 text-mc-accent'
+                        : 'bg-mc-border/50 text-mc-text-secondary'
                   }`}>
+                    {step.agentId && AVAILABLE_AGENTS.find(a => a.id === step.agentId)?.label.split(' ')[0]}
+                    {step.agentId && ' '}
                     {step.name || `Step ${i + 1}`}
                     {step.review && ' 🔍'}
                   </span>
@@ -233,13 +248,16 @@ export function WorkflowTemplateEditor({ onClose, onSave, initial }: WorkflowTem
                       className="px-2 py-1.5 bg-mc-bg-secondary border border-mc-border/50 rounded text-sm focus:outline-none focus:border-mc-accent/50"
                     />
 
-                    {/* Agent role */}
-                    <input
-                      value={step.agent_role}
-                      onChange={(e) => updateStep(step.id, 'agent_role', e.target.value)}
-                      placeholder="Agent role (optional)"
-                      className="px-2 py-1.5 bg-mc-bg-secondary border border-mc-border/50 rounded text-sm focus:outline-none focus:border-mc-accent/50"
-                    />
+                    {/* Agent selector */}
+                    <select
+                      value={step.agentId}
+                      onChange={(e) => updateStep(step.id, 'agentId', e.target.value)}
+                      className="px-2 py-1.5 bg-mc-bg-secondary border border-mc-border/50 rounded text-sm focus:outline-none focus:border-mc-accent/50 text-mc-text-secondary"
+                    >
+                      {AVAILABLE_AGENTS.map(a => (
+                        <option key={a.id} value={a.id}>{a.label}</option>
+                      ))}
+                    </select>
 
                     {/* Depends on */}
                     <select

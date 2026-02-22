@@ -247,6 +247,8 @@ export type DependencyType = 'finish_to_start' | 'start_to_start' | 'finish_to_f
 export interface WorkflowStep {
   name: string;
   agent_role?: string;
+  agentId?: string;          // OpenClaw agent ID (e.g., "market-data", "analyst", "recorder")
+  model?: string;            // Optional model override (e.g., "anthropic/claude-opus-4-6")
   tools?: string[];
   depends_on?: string;
   review?: boolean;

@@ -84,12 +84,17 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         .filter((t) => t.workflow_run_id === run.id)
         .sort((a, b) => (a.workflow_step_index ?? 0) - (b.workflow_step_index ?? 0));
 
-      const steps: PipelineStep[] = runTasks.map((t) => ({
+      // Look up template to get agentId per step
+      const template = workflowTemplates.find(wt => wt.id === run.template_id);
+      const templateSteps = template?.steps || [];
+
+      const steps: PipelineStep[] = runTasks.map((t, i) => ({
         name: t.title,
         state: run.status === 'failed' && t.status !== 'done'
           ? 'failed' as StepState
           : taskStatusToStepState(t.status),
         taskId: t.id,
+        agentId: templateSteps[t.workflow_step_index ?? i]?.agentId,
       }));
 
       // Build step details for expandable view
@@ -144,7 +149,7 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         completedAt: run.completed_at,
       };
     });
-  }, [workflowRuns, tasks]);
+  }, [workflowRuns, tasks, workflowTemplates]);
 
   const filteredRuns = useMemo(() => {
     if (filter === 'all') return pipelineRuns;
