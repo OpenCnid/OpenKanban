@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { GitBranch, Plus } from 'lucide-react';
 import { PipelineCard, type PipelineRunData } from './PipelineCard';
 import { PipelineFilters, type PipelineFilter } from './PipelineFilters';
