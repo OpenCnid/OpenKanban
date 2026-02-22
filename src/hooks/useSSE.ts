@@ -8,7 +8,7 @@
 import { useEffect, useRef } from 'react';
 import { useMissionControl } from '@/lib/store';
 import { debug } from '@/lib/debug';
-import type { SSEEvent, Task } from '@/lib/types';
+import type { SSEEvent, Task, WorkflowRun, Alert } from '@/lib/types';
 
 export function useSSE() {
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -21,6 +21,9 @@ export function useSSE() {
     setIsOnline,
     selectedTask,
     setSelectedTask,
+    addWorkflowRun,
+    updateWorkflowRun,
+    addAlert,
   } = useMissionControl();
 
   // Update ref when selectedTask changes (outside the SSE effect)
@@ -104,6 +107,21 @@ export function useSSE() {
               debug.sse('Agent completed', sseEvent.payload);
               break;
 
+            case 'workflow_run_created':
+              debug.sse('Workflow run created', sseEvent.payload);
+              addWorkflowRun(sseEvent.payload as WorkflowRun);
+              break;
+
+            case 'workflow_run_updated':
+              debug.sse('Workflow run updated', sseEvent.payload);
+              updateWorkflowRun(sseEvent.payload as WorkflowRun);
+              break;
+
+            case 'alert_created':
+              debug.sse('Alert created', sseEvent.payload);
+              addAlert(sseEvent.payload as Alert);
+              break;
+
             default:
               debug.sse('Unknown event type', sseEvent);
           }
@@ -145,5 +163,5 @@ export function useSSE() {
     };
   // selectedTask removed from deps to prevent re-connection loop
   // We use selectedTaskIdRef to check the current selected task ID without triggering re-renders
-  }, [addTask, updateTask, setIsOnline, setSelectedTask]);
+  }, [addTask, updateTask, setIsOnline, setSelectedTask, addWorkflowRun, updateWorkflowRun, addAlert]);
 }
