@@ -55,9 +55,9 @@ export function Header({ workspace, onNavigate }: HeaderProps) {
       {/* Left: Logo & Title */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
-          <Zap className="w-5 h-5 text-mc-accent-cyan" />
-          <span className="font-semibold text-mc-text uppercase tracking-wider text-sm">
-            Mission Control
+          <Zap className="w-5 h-5 text-mc-accent" />
+          <span className="font-semibold text-mc-text tracking-wide text-sm">
+            Open<span className="text-mc-accent">Kanban</span>
           </span>
         </div>
 

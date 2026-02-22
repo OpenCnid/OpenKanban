@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronLeft, LayoutDashboard, GitBranch, LayoutList, ShieldCheck, Brain } from 'lucide-react';
+import { ChevronLeft, LayoutDashboard, GitBranch, LayoutList, ShieldCheck, Brain, TrendingUp, Megaphone, Cpu } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { AgentsSidebar } from '@/components/AgentsSidebar';
 import { MissionQueue } from '@/components/MissionQueue';
@@ -14,6 +14,8 @@ import { ApprovalsList } from '@/components/approvals/ApprovalsList';
 import { DashboardHome } from '@/components/dashboard/DashboardHome';
 import { MemoryBrowser } from '@/components/memory/MemoryBrowser';
 import { GlobalSearch } from '@/components/search/GlobalSearch';
+import { QuickChat } from '@/components/chat/QuickChat';
+import { PlaceholderTab } from '@/components/shared/PlaceholderTab';
 import { useMissionControl } from '@/lib/store';
 import { useSSE } from '@/hooks/useSSE';
 import { debug } from '@/lib/debug';
@@ -25,6 +27,9 @@ const TABS = [
   { id: 'tasks', label: 'Tasks', icon: LayoutList },
   { id: 'approvals', label: 'Approvals', icon: ShieldCheck },
   { id: 'memory', label: 'Memory', icon: Brain },
+  { id: 'trading', label: 'Trading', icon: TrendingUp },
+  { id: 'content', label: 'Content', icon: Megaphone },
+  { id: 'automation', label: 'Automation', icon: Cpu },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -289,10 +294,55 @@ export default function WorkspacePage() {
         {activeTab === 'memory' && (
           <MemoryBrowser workspaceId={workspace.id} />
         )}
+        {activeTab === 'trading' && (
+          <PlaceholderTab
+            icon="📈"
+            title="Trading Dashboard"
+            description="Monitor positions, alerts, and market data from your trading workflow."
+            phase="Phase 3"
+            features={[
+              'LiveVol position monitoring',
+              'Price alerts & notifications',
+              'Trade journal with P&L tracking',
+              'Market scanner integration',
+            ]}
+          />
+        )}
+        {activeTab === 'content' && (
+          <PlaceholderTab
+            icon="📺"
+            title="Content Pipeline"
+            description="Manage content creation, scheduling, and distribution across platforms."
+            phase="Phase 4"
+            features={[
+              'Wednesday Show prep workflow',
+              'Content calendar & scheduling',
+              'Multi-platform distribution',
+              'Performance analytics',
+            ]}
+          />
+        )}
+        {activeTab === 'automation' && (
+          <PlaceholderTab
+            icon="🤖"
+            title="Automation Rules"
+            description="Define triggers, conditions, and actions that run automatically."
+            phase="Phase 5"
+            features={[
+              'If-then automation rules',
+              'Webhook triggers',
+              'Scheduled actions',
+              'Cross-workflow orchestration',
+            ]}
+          />
+        )}
 
         {/* Live Feed */}
         <LiveFeed />
       </div>
+
+      {/* Quick Chat */}
+      <QuickChat workspaceId={workspace.id} />
 
       {/* Debug Panel - only shows when debug mode enabled */}
       <SSEDebugPanel />
