@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { debug } from './debug';
-import type { Agent, Task, Conversation, Message, Event, TaskStatus, OpenClawSession } from './types';
+import type { Agent, Task, Conversation, Message, Event, TaskStatus, OpenClawSession, WorkflowTemplate, WorkflowRun, Alert } from './types';
 
 interface MissionControlState {
   // Data
@@ -12,6 +12,11 @@ interface MissionControlState {
   events: Event[];
   currentConversation: Conversation | null;
   messages: Message[];
+
+  // Workflow state
+  workflowTemplates: WorkflowTemplate[];
+  workflowRuns: WorkflowRun[];
+  alerts: Alert[];
 
   // OpenClaw state
   agentOpenClawSessions: Record<string, OpenClawSession | null>; // agentId -> session
@@ -39,6 +44,20 @@ interface MissionControlState {
   setIsLoading: (loading: boolean) => void;
   setSelectedBusiness: (business: string) => void;
 
+  // Workflow mutations
+  setWorkflowTemplates: (templates: WorkflowTemplate[]) => void;
+  addWorkflowTemplate: (template: WorkflowTemplate) => void;
+  updateWorkflowTemplate: (template: WorkflowTemplate) => void;
+  deleteWorkflowTemplate: (id: string) => void;
+  setWorkflowRuns: (runs: WorkflowRun[]) => void;
+  addWorkflowRun: (run: WorkflowRun) => void;
+  updateWorkflowRun: (run: WorkflowRun) => void;
+
+  // Alert mutations
+  setAlerts: (alerts: Alert[]) => void;
+  addAlert: (alert: Alert) => void;
+  acknowledgeAlert: (id: string) => void;
+
   // Task mutations
   updateTaskStatus: (taskId: string, status: TaskStatus) => void;
   updateTask: (task: Task) => void;
@@ -62,6 +81,9 @@ export const useMissionControl = create<MissionControlState>((set) => ({
   events: [],
   currentConversation: null,
   messages: [],
+  workflowTemplates: [],
+  workflowRuns: [],
+  alerts: [],
   agentOpenClawSessions: {},
   openclawMessages: [],
   selectedAgent: null,
@@ -95,6 +117,45 @@ export const useMissionControl = create<MissionControlState>((set) => ({
   },
   setIsLoading: (loading) => set({ isLoading: loading }),
   setSelectedBusiness: (business) => set({ selectedBusiness: business }),
+
+  // Workflow mutations
+  setWorkflowTemplates: (templates) => set({ workflowTemplates: templates }),
+  addWorkflowTemplate: (template) =>
+    set((state) => ({
+      workflowTemplates: [template, ...state.workflowTemplates],
+    })),
+  updateWorkflowTemplate: (updated) =>
+    set((state) => ({
+      workflowTemplates: state.workflowTemplates.map((t) =>
+        t.id === updated.id ? updated : t
+      ),
+    })),
+  deleteWorkflowTemplate: (id) =>
+    set((state) => ({
+      workflowTemplates: state.workflowTemplates.filter((t) => t.id !== id),
+    })),
+  setWorkflowRuns: (runs) => set({ workflowRuns: runs }),
+  addWorkflowRun: (newRun) =>
+    set((state) => ({
+      workflowRuns: [newRun, ...state.workflowRuns],
+    })),
+  updateWorkflowRun: (updated) =>
+    set((state) => ({
+      workflowRuns: state.workflowRuns.map((r) =>
+        r.id === updated.id ? updated : r
+      ),
+    })),
+
+  // Alert mutations
+  setAlerts: (alerts) => set({ alerts }),
+  addAlert: (alert) =>
+    set((state) => ({ alerts: [alert, ...state.alerts] })),
+  acknowledgeAlert: (id) =>
+    set((state) => ({
+      alerts: state.alerts.map((a) =>
+        a.id === id ? { ...a, acknowledged: true } : a
+      ),
+    })),
 
   // Task mutations
   updateTaskStatus: (taskId, status) => {
