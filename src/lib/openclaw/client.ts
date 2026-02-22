@@ -494,7 +494,13 @@ export class OpenClawClient extends EventEmitter {
     timeoutSeconds?: number;
     cleanup?: 'delete' | 'keep';
   }): Promise<{ sessionKey: string; [key: string]: unknown }> {
-    return this.invokeToolHttp<{ sessionKey: string; [key: string]: unknown }>('sessions_spawn', params);
+    const raw = await this.invokeToolHttp<Record<string, unknown>>('sessions_spawn', params);
+    // Unwrap { content, details } wrapper
+    const details = (raw?.details || raw) as Record<string, unknown>;
+    return {
+      sessionKey: (details.childSessionKey || details.sessionKey || '') as string,
+      ...details,
+    };
   }
 
   /**
@@ -514,7 +520,16 @@ export class OpenClawClient extends EventEmitter {
    * List sub-agent sessions, optionally filtering by recent activity.
    */
   async listSubagents(params?: { recentMinutes?: number }): Promise<unknown[]> {
-    return this.invokeToolHttp<unknown[]>('subagents', { action: 'list', ...params });
+    const raw = await this.invokeToolHttp<Record<string, unknown>>('subagents', { action: 'list', ...params });
+    // Response shape: { content: [...], details: { active: [...], recent: [...] } }
+    const details = (raw as Record<string, unknown>)?.details as Record<string, unknown> | undefined;
+    if (details) {
+      const active = Array.isArray(details.active) ? details.active : [];
+      const recent = Array.isArray(details.recent) ? details.recent : [];
+      return [...active, ...recent];
+    }
+    // Fallback: if it's already an array
+    return Array.isArray(raw) ? raw : [];
   }
 
   /**
@@ -616,22 +631,33 @@ export class OpenClawClient extends EventEmitter {
 
   async searchMemory(query: string, params?: { limit?: number; scope?: 'session' | 'long-term' | 'all' }): Promise<unknown[]> {
     const result = await this.invokeToolHttp<unknown>('memory_search', { query, ...params });
-    // Tool returns { memories: [...] } or array directly
-    if (Array.isArray(result)) return result;
-    if (result && typeof result === 'object' && 'memories' in (result as Record<string, unknown>)) {
-      return (result as Record<string, unknown>).memories as unknown[];
-    }
-    if (result && typeof result === 'object' && 'results' in (result as Record<string, unknown>)) {
-      return (result as Record<string, unknown>).results as unknown[];
-    }
-    return [];
+    return this.extractMemories(result);
   }
 
   async listMemories(params?: { scope?: 'session' | 'long-term' | 'all' }): Promise<unknown[]> {
     const result = await this.invokeToolHttp<unknown>('memory_list', { ...params });
+    return this.extractMemories(result);
+  }
+
+  /**
+   * Extract memories from various response shapes:
+   * - { content, details: { memories: [...] } } (tool invoke wrapper)
+   * - { memories: [...] } (direct)
+   * - [...] (array)
+   */
+  private extractMemories(result: unknown): unknown[] {
     if (Array.isArray(result)) return result;
-    if (result && typeof result === 'object' && 'memories' in (result as Record<string, unknown>)) {
-      return (result as Record<string, unknown>).memories as unknown[];
+    if (result && typeof result === 'object') {
+      const obj = result as Record<string, unknown>;
+      // Tool invoke wrapper: { details: { memories: [...] } }
+      if (obj.details && typeof obj.details === 'object') {
+        const details = obj.details as Record<string, unknown>;
+        if (Array.isArray(details.memories)) return details.memories;
+        if (Array.isArray(details.results)) return details.results;
+      }
+      // Direct: { memories: [...] }
+      if (Array.isArray(obj.memories)) return obj.memories;
+      if (Array.isArray(obj.results)) return obj.results;
     }
     return [];
   }

@@ -19,8 +19,8 @@ import { broadcast } from '@/lib/events';
 import { recordOutcome } from '@/lib/workflow-intelligence';
 import type { Task, WorkflowRun, WorkflowStep, WorkflowTemplate, Approval } from '@/lib/types';
 
-// Track active step sessions: taskId → sessionKey
-const activeStepSessions = new Map<string, string>();
+// activeStepSessions is declared via globalThis at the bottom of this file
+// to survive Next.js HMR. See GLOBAL_SESSIONS_KEY.
 
 /**
  * Get the template steps as parsed JSON.
@@ -257,7 +257,7 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
         task: prompt,
         label,
         model: 'anthropic/claude-sonnet-4-6',
-        cleanup: 'delete',
+        cleanup: 'keep', // Keep so poller can detect completion; poller cleans up after
         runTimeoutSeconds: 300,
       });
 
@@ -498,3 +498,198 @@ export async function cancelRun(runId: string): Promise<{ success: boolean; erro
 export function getActiveSession(taskId: string): string | undefined {
   return activeStepSessions.get(taskId);
 }
+
+// ============================================================
+// Sub-agent completion poller
+// ============================================================
+// sessions_spawn is fire-and-forget. This poller checks active
+// sub-agent sessions and marks tasks done when they complete.
+
+// Use globalThis to survive Next.js HMR module reloads
+const GLOBAL_POLLER_KEY = '__wf_completion_poller__';
+const GLOBAL_SESSIONS_KEY = '__wf_active_sessions__';
+const POLL_INTERVAL_MS = 5000;
+
+// Persist activeStepSessions across HMR too
+if (!(GLOBAL_SESSIONS_KEY in globalThis)) {
+  (globalThis as Record<string, unknown>)[GLOBAL_SESSIONS_KEY] = new Map<string, string>();
+}
+const activeStepSessions = (globalThis as unknown as Record<string, Map<string, string>>)[GLOBAL_SESSIONS_KEY];
+
+async function pollActiveSteps(): Promise<void> {
+  if (activeStepSessions.size === 0) return;
+
+  try {
+    const client = getOpenClawClient();
+    if (!client.isConnected()) return;
+
+    // Get active + recently completed sub-agents from OpenClaw
+    const subagents = await client.listSubagents({ recentMinutes: 60 }) as Array<{
+      sessionKey?: string;
+      label?: string;
+      status?: string;
+      completedAt?: string;
+      result?: string;
+    }>;
+
+    const entries = Array.from(activeStepSessions.entries());
+    for (const [taskId, sessionKey] of entries) {
+      // Find this session in the sub-agents list
+      const agent = subagents.find(
+        (a) => a.sessionKey === sessionKey || a.label === sessionKey
+      );
+
+      if (!agent) {
+        // Session not found — might have been cleaned up (cleanup: 'delete')
+        // Check if enough time has passed (avoid marking done too early)
+        const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+        if (!task || task.status !== 'in_progress') {
+          activeStepSessions.delete(taskId);
+          continue;
+        }
+
+        // If the task has been in_progress for > 15s and the session is gone,
+        // it probably completed and was cleaned up
+        const elapsed = Date.now() - new Date(task.updated_at).getTime();
+        if (elapsed > 15000) {
+          console.log(`[WorkflowEngine] Session ${sessionKey} for task ${taskId} not found — assuming completed`);
+          handleStepCompletion(taskId, 'Sub-agent session completed (session cleaned up)');
+        }
+        continue;
+      }
+
+      // Check if the sub-agent finished
+      if (agent.completedAt || agent.status === 'completed' || agent.status === 'done') {
+        console.log(`[WorkflowEngine] Sub-agent ${sessionKey} completed for task ${taskId}`);
+
+        // Try to get the result from session history
+        let output = agent.result || '';
+        if (!output) {
+          try {
+            const history = await client.getSubagentHistory(
+              agent.sessionKey || sessionKey,
+              { limit: 5 }
+            ) as Array<{ role?: string; content?: string | Array<{ type: string; text?: string }> }>;
+            const lastAssistant = history?.filter((m) => m.role === 'assistant').pop();
+            if (lastAssistant?.content) {
+              if (typeof lastAssistant.content === 'string') {
+                output = lastAssistant.content.slice(0, 5000);
+              } else if (Array.isArray(lastAssistant.content)) {
+                // Content blocks: [{ type: 'text', text: '...' }]
+                output = lastAssistant.content
+                  .filter((b) => b.type === 'text' && b.text)
+                  .map((b) => b.text)
+                  .join('\n')
+                  .slice(0, 5000);
+              }
+            }
+          } catch {
+            // Session might already be deleted
+          }
+        }
+
+        handleStepCompletion(taskId, output);
+
+        // Clean up the session now that we've extracted the output
+        try {
+          await client.killSubagent(agent.sessionKey || sessionKey);
+        } catch {
+          // Already cleaned up
+        }
+      } else if (agent.status === 'failed' || agent.status === 'error') {
+        console.error(`[WorkflowEngine] Sub-agent ${sessionKey} failed for task ${taskId}`);
+        handleStepFailure(taskId, agent.result || 'Sub-agent failed');
+
+        try {
+          await client.killSubagent(agent.sessionKey || sessionKey);
+        } catch { /* ignore */ }
+      }
+    }
+  } catch (err) {
+    console.warn('[WorkflowEngine] Poller error:', err);
+  }
+}
+
+function handleStepCompletion(taskId: string, output: string): void {
+  activeStepSessions.delete(taskId);
+
+  const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+  if (!task || task.status !== 'in_progress') return;
+
+  // Store output as a deliverable
+  if (output) {
+    const now = new Date().toISOString();
+    const delivId = uuidv4();
+    run(
+      `INSERT INTO task_deliverables (id, task_id, title, path, description, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [delivId, taskId, `${task.title} — Output`, 'agent-output', output.slice(0, 5000), now]
+    );
+  }
+
+  // Check if this step has a review checkpoint
+  if (task.workflow_run_id) {
+    const template = queryOne<WorkflowTemplate>(
+      `SELECT wt.* FROM workflow_templates wt
+       JOIN workflow_runs wr ON wr.template_id = wt.id
+       WHERE wr.id = ?`,
+      [task.workflow_run_id]
+    );
+
+    if (template) {
+      const steps = parseSteps(template);
+      const step = steps[task.workflow_step_index ?? 0];
+      if (step?.review) {
+        // Move to review instead of done
+        updateTaskStatus(taskId, 'review');
+        onStepReview(taskId);
+        return;
+      }
+    }
+  }
+
+  // Mark done and advance pipeline
+  updateTaskStatus(taskId, 'done');
+  onStepCompleted(taskId);
+}
+
+function handleStepFailure(taskId: string, error: string): void {
+  activeStepSessions.delete(taskId);
+
+  const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+  if (!task || task.status !== 'in_progress') return;
+
+  updateTaskStatus(taskId, 'inbox'); // Revert
+
+  if (task.workflow_run_id) {
+    updateRunStatus(task.workflow_run_id, 'failed', {
+      outcome: `Step "${task.title}" failed: ${error}`,
+    });
+    recordOutcome(task.workflow_run_id);
+  }
+}
+
+/**
+ * Start the completion poller. Uses globalThis to survive HMR.
+ */
+export function startCompletionPoller(): void {
+  const existing = (globalThis as Record<string, unknown>)[GLOBAL_POLLER_KEY];
+  if (existing) return; // Already running
+
+  const interval = setInterval(pollActiveSteps, POLL_INTERVAL_MS);
+  (globalThis as Record<string, unknown>)[GLOBAL_POLLER_KEY] = interval;
+  console.log('[WorkflowEngine] Completion poller started (every 5s)');
+}
+
+/**
+ * Stop the completion poller.
+ */
+export function stopCompletionPoller(): void {
+  const interval = (globalThis as Record<string, unknown>)[GLOBAL_POLLER_KEY] as ReturnType<typeof setInterval> | undefined;
+  if (interval) {
+    clearInterval(interval);
+    (globalThis as Record<string, unknown>)[GLOBAL_POLLER_KEY] = null;
+  }
+}
+
+// Poller is started via @/lib/init — import init from any API route to activate.

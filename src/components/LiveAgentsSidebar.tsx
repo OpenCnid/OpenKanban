@@ -56,8 +56,8 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
     return () => window.removeEventListener('sse-event', handler);
   }, [loadSubAgents]);
 
-  const activeAgents = subAgents.filter(a => !a.completedAt && a.status !== 'completed');
-  const recentAgents = subAgents.filter(a => a.completedAt || a.status === 'completed').slice(0, 5);
+  const activeAgents = subAgents.filter(a => a.status === 'running' || a.status === 'active');
+  const recentAgents = subAgents.filter(a => a.status === 'done' || a.status === 'completed').slice(0, 3);
 
   const getStatusIcon = (agent: SubAgent) => {
     if (agent.completedAt || agent.status === 'completed') return <CheckCircle className="w-3 h-3 text-green-400" />;

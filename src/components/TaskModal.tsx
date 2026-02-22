@@ -141,7 +141,7 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
     }
   };
 
-  const statuses: TaskStatus[] = ['planning', 'inbox', 'assigned', 'in_progress', 'testing', 'review', 'done'];
+  const statuses: TaskStatus[] = ['inbox', 'in_progress', 'review', 'done'];
   const priorities: TaskPriority[] = ['low', 'normal', 'high', 'urgent'];
 
   const tabs = [

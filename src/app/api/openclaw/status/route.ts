@@ -18,19 +18,20 @@ export async function GET() {
       }
     }
 
-    // Try to list sessions to verify connection
+    // Verify connection by listing sessions via HTTP tool invoke
     try {
-      const sessions = await client.listSessions();
+      const sessions = await client.listSubagents({ recentMinutes: 60 });
       return NextResponse.json({
         connected: true,
-        sessions_count: sessions.length,
-        sessions: sessions,
+        active_subagents: Array.isArray(sessions) ? sessions.length : 0,
         gateway_url: process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789',
       });
     } catch (err) {
+      // Even if listing fails, the connection itself is up
       return NextResponse.json({
         connected: true,
-        error: 'Connected but failed to list sessions',
+        active_subagents: 0,
+        error: err instanceof Error ? err.message : 'Unknown error',
         gateway_url: process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789',
       });
     }

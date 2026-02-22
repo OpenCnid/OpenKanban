@@ -4,7 +4,9 @@ import { useState, useEffect } from 'react';
 import { LayoutDashboard } from 'lucide-react';
 import { StatsCards } from './StatsCards';
 import { ActivePipelinesWidget } from './ActivePipelinesWidget';
+import { TaskOutputModal } from './TaskOutputModal';
 import { useMissionControl } from '@/lib/store';
+import type { Task } from '@/lib/types';
 
 interface DashboardHomeProps {
   workspaceId: string;
@@ -14,6 +16,7 @@ interface DashboardHomeProps {
 export function DashboardHome({ workspaceId, onNavigateToPipelines }: DashboardHomeProps) {
   const { workflowRuns, workflowTemplates, agents, tasks } = useMissionControl();
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   // Fetch pending approval count
   useEffect(() => {
@@ -82,13 +85,17 @@ export function DashboardHome({ workspaceId, onNavigateToPipelines }: DashboardH
                   };
                   const statusEmoji = emojiMap[task.status] || '○';
                   return (
-                    <div key={task.id} className="flex items-start gap-2 text-sm">
+                    <button
+                      key={task.id}
+                      onClick={() => setSelectedTask(task)}
+                      className="flex items-start gap-2 text-sm w-full text-left hover:bg-mc-bg-tertiary/50 rounded px-1.5 py-1 -mx-1.5 transition-colors cursor-pointer"
+                    >
                       <span className="text-xs mt-0.5">{statusEmoji}</span>
                       <div className="flex-1 min-w-0">
                         <span className="truncate block">{task.title}</span>
                         <span className="text-[10px] text-mc-text-secondary">{task.status}</span>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -96,6 +103,11 @@ export function DashboardHome({ workspaceId, onNavigateToPipelines }: DashboardH
           </div>
         </div>
       </div>
+
+      {/* Task Output Modal */}
+      {selectedTask && (
+        <TaskOutputModal task={selectedTask} onClose={() => setSelectedTask(null)} />
+      )}
     </div>
   );
 }
