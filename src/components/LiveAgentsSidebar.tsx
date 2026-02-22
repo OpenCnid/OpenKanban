@@ -1,16 +1,19 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronRight, ChevronLeft, Loader2, Bot, Clock, CheckCircle, XCircle, Pause } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Loader2, Bot, Clock, CheckCircle, XCircle } from 'lucide-react';
 
 interface SubAgent {
-  sessionKey: string;
+  sessionKey?: string;
   label?: string;
   status?: string;
   task?: string;
   model?: string;
-  startedAt?: string;
-  completedAt?: string;
+  runtime?: string;
+  runtimeMs?: number;
+  startedAt?: number;
+  endedAt?: number;
+  totalTokens?: number;
 }
 
 interface LiveAgentsSidebarProps {
@@ -24,13 +27,13 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
 
   const loadSubAgents = useCallback(async () => {
     try {
-      const res = await fetch('/api/openclaw/sessions?session_type=subagent');
+      const res = await fetch('/api/openclaw/sessions');
       if (res.ok) {
         const data = await res.json();
         setSubAgents(Array.isArray(data) ? data : []);
       }
     } catch {
-      // Silent — OpenClaw may be unavailable
+      // Silent
     } finally {
       setLoading(false);
     }
@@ -38,11 +41,11 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
 
   useEffect(() => {
     loadSubAgents();
-    const interval = setInterval(loadSubAgents, 10000);
+    const interval = setInterval(loadSubAgents, 8000);
     return () => clearInterval(interval);
   }, [loadSubAgents]);
 
-  // Also refresh on SSE events
+  // SSE-driven refresh
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -57,37 +60,43 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
   }, [loadSubAgents]);
 
   const activeAgents = subAgents.filter(a => a.status === 'running' || a.status === 'active');
-  const recentAgents = subAgents.filter(a => a.status === 'done' || a.status === 'completed').slice(0, 3);
+  const recentAgents = subAgents.filter(a => a.status === 'done' || a.status === 'completed').slice(0, 5);
 
   const getStatusIcon = (agent: SubAgent) => {
-    if (agent.completedAt || agent.status === 'completed') return <CheckCircle className="w-3 h-3 text-green-400" />;
-    if (agent.status === 'failed') return <XCircle className="w-3 h-3 text-red-400" />;
-    if (agent.status === 'paused') return <Pause className="w-3 h-3 text-amber-400" />;
+    if (agent.status === 'done' || agent.status === 'completed') return <CheckCircle className="w-3 h-3 text-green-400" />;
+    if (agent.status === 'failed' || agent.status === 'error') return <XCircle className="w-3 h-3 text-red-400" />;
     return <Loader2 className="w-3 h-3 text-teal-400 animate-spin" />;
   };
 
-  const getTaskLabel = (agent: SubAgent): string => {
-    // Parse the task/label to get a human-readable description
-    if (agent.label) {
-      // Labels like "wf-abc123-step0" → extract meaningful part
-      const match = agent.label.match(/^wf-.*-step(\d+)$/);
-      if (match) return `Pipeline step ${parseInt(match[1]) + 1}`;
-      // Labels like "openkanban-chat-123" → Chat session
-      if (agent.label.includes('chat')) return 'Chat conversation';
-      return agent.label;
-    }
+  const getTaskSummary = (agent: SubAgent): string => {
+    // Extract the step name from the task prompt
     if (agent.task) {
-      return agent.task.length > 60 ? agent.task.slice(0, 57) + '...' : agent.task;
+      // Tasks start with "## Workflow Step: Market Data Pull\n**Pipeline:**..."
+      const stepMatch = agent.task.match(/Workflow Step:\s*([^\n*]+)/);
+      if (stepMatch) return stepMatch[1].trim();
+
+      // Fallback: first meaningful line
+      const firstLine = agent.task.split('\n')[0].replace(/^#+\s*/, '').trim();
+      if (firstLine.length > 3) return firstLine.length > 50 ? firstLine.slice(0, 47) + '...' : firstLine;
+    }
+
+    // Parse label: wf-abc123-step0 → "Step 1"
+    if (agent.label) {
+      const stepMatch = agent.label.match(/step(\d+)$/);
+      if (stepMatch) return `Step ${parseInt(stepMatch[1]) + 1}`;
+      if (agent.label.includes('chat')) return 'Chat';
+      return agent.label;
     }
     return 'Working...';
   };
 
-  const formatElapsed = (startedAt: string) => {
-    const diff = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
-    if (diff < 60) return `${diff}s`;
-    const mins = Math.floor(diff / 60);
-    if (mins < 60) return `${mins}m`;
-    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+  const getModelShort = (agent: SubAgent): string => {
+    if (!agent.model) return '';
+    const parts = agent.model.split('/');
+    const name = parts[parts.length - 1];
+    if (name.includes('sonnet')) return 'sonnet';
+    if (name.includes('opus')) return 'opus';
+    return name;
   };
 
   return (
@@ -119,14 +128,9 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
       </div>
 
       {isMinimized ? (
-        /* Minimized: just dots */
         <div className="flex-1 flex flex-col items-center pt-3 gap-2">
-          {activeAgents.map((agent) => (
-            <div
-              key={agent.sessionKey}
-              className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse"
-              title={getTaskLabel(agent)}
-            />
+          {activeAgents.map((agent, i) => (
+            <div key={i} className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse" title={getTaskSummary(agent)} />
           ))}
           {activeAgents.length === 0 && (
             <div className="w-2.5 h-2.5 rounded-full bg-mc-text-secondary/20" title="No active agents" />
@@ -137,37 +141,21 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
           {/* Active agents */}
           {activeAgents.length > 0 ? (
             <div className="p-3">
-              <p className="text-[10px] uppercase text-mc-text-secondary/50 font-medium mb-2 tracking-wider">
-                Working
-              </p>
+              <p className="text-[10px] uppercase text-mc-text-secondary/50 font-medium mb-2 tracking-wider">Working</p>
               <div className="space-y-2">
-                {activeAgents.map((agent) => (
-                  <div
-                    key={agent.sessionKey}
-                    className="p-2.5 bg-mc-bg-tertiary/50 border border-mc-border/30 rounded-lg"
-                  >
+                {activeAgents.map((agent, i) => (
+                  <div key={i} className="p-2.5 bg-mc-bg-tertiary/50 border border-mc-border/30 rounded-lg">
                     <div className="flex items-start gap-2">
                       {getStatusIcon(agent)}
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs text-mc-text leading-snug">
-                          {getTaskLabel(agent)}
-                        </p>
-                        {agent.task && agent.task !== getTaskLabel(agent) && (
-                          <p className="text-[10px] text-mc-text-secondary/60 mt-0.5 line-clamp-2">
-                            {agent.task}
-                          </p>
-                        )}
+                        <p className="text-xs text-mc-text leading-snug font-medium">{getTaskSummary(agent)}</p>
                         <div className="flex items-center gap-2 mt-1">
-                          {agent.startedAt && (
-                            <span className="flex items-center gap-0.5 text-[10px] text-mc-text-secondary/50">
-                              <Clock className="w-2.5 h-2.5" />
-                              {formatElapsed(agent.startedAt)}
-                            </span>
-                          )}
+                          <span className="flex items-center gap-0.5 text-[10px] text-mc-text-secondary/50">
+                            <Clock className="w-2.5 h-2.5" />
+                            {agent.runtime || '...'}
+                          </span>
                           {agent.model && (
-                            <span className="text-[10px] text-mc-text-secondary/40">
-                              {agent.model.split('/').pop()}
-                            </span>
+                            <span className="text-[10px] text-mc-text-secondary/40">{getModelShort(agent)}</span>
                           )}
                         </div>
                       </div>
@@ -188,19 +176,13 @@ export function LiveAgentsSidebar({ workspaceId }: LiveAgentsSidebarProps) {
           {/* Recently completed */}
           {recentAgents.length > 0 && (
             <div className="p-3 border-t border-mc-border/30">
-              <p className="text-[10px] uppercase text-mc-text-secondary/40 font-medium mb-2 tracking-wider">
-                Recent
-              </p>
+              <p className="text-[10px] uppercase text-mc-text-secondary/40 font-medium mb-2 tracking-wider">Recent</p>
               <div className="space-y-1.5">
-                {recentAgents.map((agent) => (
-                  <div
-                    key={agent.sessionKey}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded text-mc-text-secondary/60"
-                  >
+                {recentAgents.map((agent, i) => (
+                  <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded text-mc-text-secondary/60">
                     {getStatusIcon(agent)}
-                    <span className="text-[11px] truncate">
-                      {getTaskLabel(agent)}
-                    </span>
+                    <span className="text-[11px] truncate flex-1">{getTaskSummary(agent)}</span>
+                    <span className="text-[10px] text-mc-text-secondary/30">{agent.runtime}</span>
                   </div>
                 ))}
               </div>

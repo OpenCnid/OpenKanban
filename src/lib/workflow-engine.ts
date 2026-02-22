@@ -1,3 +1,5 @@
+console.log('[WorkflowEngine] MODULE LOADED');
+
 /**
  * Workflow Engine — translates workflow templates into OpenClaw operations.
  *
@@ -19,8 +21,12 @@ import { broadcast } from '@/lib/events';
 import { recordOutcome } from '@/lib/workflow-intelligence';
 import type { Task, WorkflowRun, WorkflowStep, WorkflowTemplate, Approval } from '@/lib/types';
 
-// activeStepSessions is declared via globalThis at the bottom of this file
-// to survive Next.js HMR. See GLOBAL_SESSIONS_KEY.
+// Track active step sessions on globalThis to survive Next.js HMR
+const WF_SESSIONS_KEY = '__wf_active_sessions__';
+if (!(WF_SESSIONS_KEY in globalThis)) {
+  (globalThis as Record<string, unknown>)[WF_SESSIONS_KEY] = new Map<string, string>();
+}
+const activeStepSessions = (globalThis as unknown as Record<string, Map<string, string>>)[WF_SESSIONS_KEY];
 
 /**
  * Get the template steps as parsed JSON.
@@ -261,8 +267,10 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
         runTimeoutSeconds: 300,
       });
 
-      // Track the session
-      activeStepSessions.set(task.id, result.sessionKey || label);
+      // Track the session for the completion poller
+      const sessionKey = result.sessionKey || label;
+      activeStepSessions.set(task.id, sessionKey);
+      console.log(`[WorkflowEngine] Tracking session: ${sessionKey} for task ${task.id} (total tracked: ${activeStepSessions.size})`);
 
       // Store session key in task metadata
       run(
@@ -331,8 +339,9 @@ export async function onStepCompleted(taskId: string): Promise<void> {
 
 /**
  * Handle step moved to review — pause the run for human approval.
+ * Includes the agent's output in the approval so the reviewer knows what to approve.
  */
-export function onStepReview(taskId: string): void {
+export function onStepReview(taskId: string, agentOutput?: string): void {
   const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
   if (!task?.workflow_run_id) return;
 
@@ -353,7 +362,9 @@ export function onStepReview(taskId: string): void {
       approvalId,
       'step_review',
       `Review: ${task.title}`,
-      `Step "${task.title}" in pipeline "${template?.name || 'Unknown'}" requires your review before proceeding.`,
+      agentOutput
+        ? `Step "${task.title}" completed. Agent output:\n\n${agentOutput.slice(0, 2000)}`
+        : `Step "${task.title}" in pipeline "${template?.name || 'Unknown'}" requires your review before proceeding.`,
       'workflow_engine',
       taskId,
       task.workflow_run_id,
@@ -371,7 +382,9 @@ export function onStepReview(taskId: string): void {
       notifId,
       'approval_needed',
       `Review needed: ${task.title}`,
-      `Step "${task.title}" in "${template?.name || 'Unknown'}" is ready for your review.`,
+      agentOutput
+        ? `Step "${task.title}" finished — review the output and approve or reject.`
+        : `Step "${task.title}" in "${template?.name || 'Unknown'}" is ready for your review.`,
       `/workspace/default?tab=pipelines`,
       approvalId,
       now,
@@ -507,14 +520,7 @@ export function getActiveSession(taskId: string): string | undefined {
 
 // Use globalThis to survive Next.js HMR module reloads
 const GLOBAL_POLLER_KEY = '__wf_completion_poller__';
-const GLOBAL_SESSIONS_KEY = '__wf_active_sessions__';
 const POLL_INTERVAL_MS = 5000;
-
-// Persist activeStepSessions across HMR too
-if (!(GLOBAL_SESSIONS_KEY in globalThis)) {
-  (globalThis as Record<string, unknown>)[GLOBAL_SESSIONS_KEY] = new Map<string, string>();
-}
-const activeStepSessions = (globalThis as unknown as Record<string, Map<string, string>>)[GLOBAL_SESSIONS_KEY];
 
 async function pollActiveSteps(): Promise<void> {
   if (activeStepSessions.size === 0) return;
@@ -588,7 +594,8 @@ async function pollActiveSteps(): Promise<void> {
           }
         }
 
-        handleStepCompletion(taskId, output);
+        console.log(`[WorkflowEngine] Extracted output for ${taskId}: ${output.length} chars, first 100: ${output.slice(0, 100)}`);
+        handleStepCompletion(taskId, output || 'Agent completed successfully (no text output captured)');
 
         // Clean up the session now that we've extracted the output
         try {
@@ -616,15 +623,22 @@ function handleStepCompletion(taskId: string, output: string): void {
   const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
   if (!task || task.status !== 'in_progress') return;
 
+  console.log(`[WorkflowEngine] handleStepCompletion for "${task.title}" — output length: ${output.length}`);
+
   // Store output as a deliverable
   if (output) {
-    const now = new Date().toISOString();
-    const delivId = uuidv4();
-    run(
-      `INSERT INTO task_deliverables (id, task_id, title, path, description, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [delivId, taskId, `${task.title} — Output`, 'agent-output', output.slice(0, 5000), now]
-    );
+    try {
+      const now = new Date().toISOString();
+      const delivId = uuidv4();
+      run(
+        `INSERT INTO task_deliverables (id, task_id, deliverable_type, title, path, description, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [delivId, taskId, 'agent_output', `${task.title} — Output`, 'agent-output', output.slice(0, 5000), now]
+      );
+      console.log(`[WorkflowEngine] Stored deliverable for "${task.title}" (${output.length} chars)`);
+    } catch (err) {
+      console.error(`[WorkflowEngine] Failed to store deliverable:`, err);
+    }
   }
 
   // Check if this step has a review checkpoint
@@ -640,9 +654,9 @@ function handleStepCompletion(taskId: string, output: string): void {
       const steps = parseSteps(template);
       const step = steps[task.workflow_step_index ?? 0];
       if (step?.review) {
-        // Move to review instead of done
+        // Move to review instead of done — pass agent output for approval context
         updateTaskStatus(taskId, 'review');
-        onStepReview(taskId);
+        onStepReview(taskId, output);
         return;
       }
     }
@@ -673,12 +687,16 @@ function handleStepFailure(taskId: string, error: string): void {
  * Start the completion poller. Uses globalThis to survive HMR.
  */
 export function startCompletionPoller(): void {
+  console.log('[WorkflowEngine] startCompletionPoller called, existing:', !!(globalThis as Record<string, unknown>)[GLOBAL_POLLER_KEY]);
   const existing = (globalThis as Record<string, unknown>)[GLOBAL_POLLER_KEY];
   if (existing) return; // Already running
 
-  const interval = setInterval(pollActiveSteps, POLL_INTERVAL_MS);
+  const interval = setInterval(() => {
+    console.log(`[WorkflowEngine] Polling... active sessions: ${activeStepSessions.size}`);
+    pollActiveSteps().catch(err => console.error('[WorkflowEngine] Poll error:', err));
+  }, POLL_INTERVAL_MS);
   (globalThis as Record<string, unknown>)[GLOBAL_POLLER_KEY] = interval;
-  console.log('[WorkflowEngine] Completion poller started (every 5s)');
+  console.log('[WorkflowEngine] Completion poller STARTED (every 5s)');
 }
 
 /**

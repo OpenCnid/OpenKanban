@@ -24,6 +24,7 @@ export function useSSE() {
     addWorkflowRun,
     updateWorkflowRun,
     addAlert,
+    addEvent,
   } = useMissionControl();
 
   // Update ref when selectedTask changes (outside the SSE effect)
@@ -124,12 +125,10 @@ export function useSSE() {
 
             case 'approval_created':
               debug.sse('Approval created', sseEvent.payload);
-              window.dispatchEvent(new CustomEvent('sse-event', { detail: sseEvent }));
               break;
 
             case 'approval_updated':
               debug.sse('Approval updated', sseEvent.payload);
-              window.dispatchEvent(new CustomEvent('sse-event', { detail: sseEvent }));
               break;
 
             case 'notification_created':
@@ -139,6 +138,21 @@ export function useSSE() {
             default:
               debug.sse('Unknown event type', sseEvent);
           }
+
+          // Feed ALL events to the live feed + dispatch for other listeners
+          const payload = sseEvent.payload as Record<string, unknown> | undefined;
+          addEvent({
+            id: String(Date.now()) + Math.random().toString(36).slice(2, 6),
+            type: sseEvent.type,
+            title: String(payload?.title || payload?.name || sseEvent.type.replace(/_/g, ' ')),
+            message: String(payload?.outcome || payload?.status || payload?.title || payload?.name || ''),
+            source: 'sse',
+            workspace_id: 'default',
+            created_at: new Date().toISOString(),
+          });
+
+          // Dispatch for all components that listen
+          window.dispatchEvent(new CustomEvent('sse-event', { detail: sseEvent }));
         } catch (error) {
           console.error('[SSE] Error parsing event:', error);
         }

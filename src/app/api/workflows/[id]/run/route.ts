@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { queryOne, run, transaction } from '@/lib/db';
 import { broadcast } from '@/lib/events';
-import { executeNextStep } from '@/lib/workflow-engine';
-import '@/lib/init'; // Ensure completion poller is running
+import { executeNextStep, startCompletionPoller } from '@/lib/workflow-engine';
 import type { WorkflowTemplate, WorkflowStep, WorkflowRun, Task } from '@/lib/types';
+
+// Ensure completion poller is running
+startCompletionPoller();
 
 // POST /api/workflows/[id]/run - Trigger a workflow run from a template
 export async function POST(

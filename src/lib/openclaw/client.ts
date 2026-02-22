@@ -543,7 +543,19 @@ export class OpenClawClient extends EventEmitter {
    * Get session history for a sub-agent.
    */
   async getSubagentHistory(sessionKey: string, params?: { limit?: number; includeTools?: boolean }): Promise<unknown[]> {
-    return this.invokeToolHttp<unknown[]>('sessions_history', { sessionKey, ...params });
+    const raw = await this.invokeToolHttp<unknown>('sessions_history', { sessionKey, ...params });
+    // Response might be wrapped: { content, details: { messages: [...] } } or just an array
+    if (Array.isArray(raw)) return raw;
+    if (raw && typeof raw === 'object') {
+      const obj = raw as Record<string, unknown>;
+      if (obj.details) {
+        const details = obj.details as Record<string, unknown>;
+        if (Array.isArray(details.messages)) return details.messages;
+        if (Array.isArray(details)) return details;
+      }
+      if (Array.isArray(obj.messages)) return obj.messages;
+    }
+    return [];
   }
 
   // --- Cron / Schedule Methods ---
@@ -734,6 +746,13 @@ let clientInstance: OpenClawClient | null = null;
 export function getOpenClawClient(): OpenClawClient {
   if (!clientInstance) {
     clientInstance = new OpenClawClient();
+    // Start the workflow completion poller when client is first created
+    try {
+      const { startCompletionPoller } = require('../workflow-engine');
+      startCompletionPoller();
+    } catch {
+      // workflow-engine may not be loaded yet on first import
+    }
   }
   return clientInstance;
 }

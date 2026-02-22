@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getOpenClawClient } from '@/lib/openclaw/client';
+import { startCompletionPoller } from '@/lib/workflow-engine';
+
+// Ensure poller starts when this module loads (hit on every page load)
+startCompletionPoller();
 
 // GET /api/openclaw/status - Check OpenClaw connection status
 export async function GET() {
+  // Ensure poller on every request too (survives HMR)
+  startCompletionPoller();
+
   try {
     const client = getOpenClawClient();
 
@@ -18,16 +25,16 @@ export async function GET() {
       }
     }
 
-    // Verify connection by listing sessions via HTTP tool invoke
     try {
       const sessions = await client.listSubagents({ recentMinutes: 60 });
       return NextResponse.json({
         connected: true,
-        active_subagents: Array.isArray(sessions) ? sessions.length : 0,
+        active_subagents: Array.isArray(sessions)
+          ? sessions.filter((s: Record<string, unknown>) => s.status === 'running' || s.status === 'active').length
+          : 0,
         gateway_url: process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789',
       });
     } catch (err) {
-      // Even if listing fails, the connection itself is up
       return NextResponse.json({
         connected: true,
         active_subagents: 0,
@@ -38,10 +45,7 @@ export async function GET() {
   } catch (error) {
     console.error('OpenClaw status check failed:', error);
     return NextResponse.json(
-      {
-        connected: false,
-        error: 'Internal server error',
-      },
+      { connected: false, error: 'Internal server error' },
       { status: 500 }
     );
   }

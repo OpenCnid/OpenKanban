@@ -29,13 +29,17 @@ export function Header({ workspace, onNavigate }: HeaderProps) {
   useEffect(() => {
     const loadSubAgentCount = async () => {
       try {
-        const res = await fetch('/api/openclaw/sessions?session_type=subagent&status=active');
+        const res = await fetch('/api/openclaw/sessions');
         if (res.ok) {
           const sessions = await res.json();
-          setActiveSubAgents(sessions.length);
+          // Only count actually running agents
+          const running = Array.isArray(sessions)
+            ? sessions.filter((s: { status?: string }) => s.status === 'running' || s.status === 'active').length
+            : 0;
+          setActiveSubAgents(running);
         }
-      } catch (error) {
-        console.error('Failed to load sub-agent count:', error);
+      } catch {
+        // Silent
       }
     };
 
