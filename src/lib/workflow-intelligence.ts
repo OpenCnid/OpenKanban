@@ -78,11 +78,14 @@ export function recordOutcome(runId: string): RunOutcome | null {
     outcome = 'failed';
   }
 
-  // Update the run with outcome details
-  run(
-    'UPDATE workflow_runs SET outcome = ? WHERE id = ?',
-    [outcome, runId]
-  );
+  // Update the run with outcome — only if not already set with a more detailed message
+  const existingOutcome = workflowRun.outcome;
+  if (!existingOutcome || existingOutcome === outcome) {
+    run(
+      'UPDATE workflow_runs SET outcome = ? WHERE id = ?',
+      [outcome, runId]
+    );
+  }
 
   // Update template stats
   updateTemplateStats(workflowRun.template_id);
@@ -123,9 +126,9 @@ export function updateTemplateStats(templateId: string): void {
     [templateId]
   )?.count || 0;
 
-  // Success rate (rolling window)
+  // Success rate (rolling window) — use status (canonical) not outcome (may have detailed message)
   const terminalRuns = recentRuns.filter(r => r.status === 'completed' || r.status === 'failed');
-  const successCount = terminalRuns.filter(r => r.outcome === 'success').length;
+  const successCount = terminalRuns.filter(r => r.status === 'completed').length;
   const successRate = terminalRuns.length > 0 ? successCount / terminalRuns.length : null;
 
   // Average duration (only completed runs)
@@ -200,7 +203,7 @@ export function getTemplateHealth(templateId: string): TemplateHealth | null {
   );
 
   const terminalRuns = recentRuns.filter(r => r.status === 'completed' || r.status === 'failed');
-  const successCount = terminalRuns.filter(r => r.outcome === 'success').length;
+  const successCount = terminalRuns.filter(r => r.status === 'completed').length;
   const successRate = terminalRuns.length > 0 ? successCount / terminalRuns.length : null;
 
   const completedRuns = recentRuns.filter(r => r.duration_seconds != null);

@@ -89,11 +89,15 @@ export async function POST(
       delivery: { mode: 'none' },
     });
 
+    console.log('[Schedule] Cron add result:', JSON.stringify(result));
+
+    const cronJobId = result.jobId || 'unknown';
+
     // Store cron job ID in template trigger_config
     const existingConfig = template.trigger_config ? JSON.parse(template.trigger_config as string) : {};
     const updatedConfig = {
       ...existingConfig,
-      cron_job_id: result.jobId,
+      cron_job_id: cronJobId,
       schedule: typeof schedule === 'string' ? schedule : JSON.stringify(schedule),
       timezone: timezone || 'America/Chicago',
     };
@@ -103,7 +107,7 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      cronJobId: result.jobId,
+      cronJobId,
       schedule: cronSchedule,
     });
   } catch (err) {
@@ -134,25 +138,23 @@ export async function DELETE(
     return NextResponse.json({ error: 'No schedule configured' }, { status: 404 });
   }
 
-  try {
-    const client = getOpenClawClient();
-    if (!client.isConnected()) {
-      await client.connect();
+  // Always clear the schedule from the template DB
+  const { cron_job_id, schedule, timezone, ...rest } = triggerConfig;
+  db.prepare('UPDATE workflow_templates SET trigger_type = ?, trigger_config = ?, updated_at = datetime(\'now\') WHERE id = ?')
+    .run('manual', Object.keys(rest).length > 0 ? JSON.stringify(rest) : null, id);
+
+  // Attempt to remove the cron job from OpenClaw (best effort)
+  if (cron_job_id && cron_job_id !== 'unknown') {
+    try {
+      const client = getOpenClawClient();
+      if (!client.isConnected()) {
+        await client.connect();
+      }
+      await client.removeCronJob(cron_job_id);
+    } catch (err) {
+      console.warn('[Schedule] Failed to remove cron job from OpenClaw (schedule cleared from DB):', err);
     }
-
-    await client.removeCronJob(triggerConfig.cron_job_id);
-
-    // Clear schedule from template
-    const { cron_job_id, schedule, timezone, ...rest } = triggerConfig;
-    db.prepare('UPDATE workflow_templates SET trigger_type = ?, trigger_config = ?, updated_at = datetime(\'now\') WHERE id = ?')
-      .run('manual', Object.keys(rest).length > 0 ? JSON.stringify(rest) : null, id);
-
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error('[Schedule] Failed to remove cron job:', err);
-    return NextResponse.json(
-      { error: `Failed to remove schedule: ${err instanceof Error ? err.message : 'Unknown error'}` },
-      { status: 500 }
-    );
   }
+
+  return NextResponse.json({ success: true });
 }

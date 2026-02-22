@@ -544,7 +544,7 @@ export class OpenClawClient extends EventEmitter {
     delivery?: { mode: 'none' | 'announce' | 'webhook'; to?: string };
     enabled?: boolean;
   }): Promise<{ jobId: string; [key: string]: unknown }> {
-    return this.invokeToolHttp<{ jobId: string; [key: string]: unknown }>('cron', {
+    const result = await this.invokeToolHttp<Record<string, unknown>>('cron', {
       action: 'add',
       job: {
         name: params.name,
@@ -555,6 +555,36 @@ export class OpenClawClient extends EventEmitter {
         enabled: params.enabled ?? true,
       },
     });
+
+    // Extract jobId from various response shapes:
+    // Direct: { jobId: "xxx" } or { job: { id: "xxx" } } or { id: "xxx" }
+    // Tool response: { content: [{ type: "text", text: "{ \"id\": \"xxx\", ... }" }] }
+    let jobId = (result as Record<string, unknown>).jobId as string
+      || ((result as Record<string, unknown>).job as Record<string, unknown>)?.id as string
+      || (result as Record<string, unknown>).id as string
+      || '';
+
+    // Try extracting from content[].text (tool response format)
+    if (!jobId) {
+      const content = (result as Record<string, unknown>).content as Array<{ type: string; text: string }>;
+      if (Array.isArray(content)) {
+        for (const item of content) {
+          if (item.type === 'text' && item.text) {
+            try {
+              const parsed = JSON.parse(item.text);
+              jobId = parsed.id || parsed.jobId || '';
+              if (jobId) break;
+            } catch {
+              // Try to extract id from the text with regex
+              const idMatch = item.text.match(/"id"\s*:\s*"([^"]+)"/);
+              if (idMatch) { jobId = idMatch[1]; break; }
+            }
+          }
+        }
+      }
+    }
+
+    return { ...result, jobId };
   }
 
   /**
