@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronLeft, GitBranch, LayoutList, ShieldCheck, Brain } from 'lucide-react';
+import { ChevronLeft, LayoutDashboard, GitBranch, LayoutList, ShieldCheck, Brain } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { AgentsSidebar } from '@/components/AgentsSidebar';
 import { MissionQueue } from '@/components/MissionQueue';
@@ -11,12 +11,14 @@ import { LiveFeed } from '@/components/LiveFeed';
 import { SSEDebugPanel } from '@/components/SSEDebugPanel';
 import { PipelineView } from '@/components/pipeline/PipelineView';
 import { ApprovalsList } from '@/components/approvals/ApprovalsList';
+import { DashboardHome } from '@/components/dashboard/DashboardHome';
 import { useMissionControl } from '@/lib/store';
 import { useSSE } from '@/hooks/useSSE';
 import { debug } from '@/lib/debug';
 import type { Task, Workspace } from '@/lib/types';
 
 const TABS = [
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'pipelines', label: 'Pipelines', icon: GitBranch },
   { id: 'tasks', label: 'Tasks', icon: LayoutList },
   { id: 'approvals', label: 'Approvals', icon: ShieldCheck },
@@ -31,7 +33,7 @@ export default function WorkspacePage() {
   const router = useRouter();
   const slug = params.slug as string;
   
-  const activeTab = (searchParams.get('tab') as TabId) || 'pipelines';
+  const activeTab = (searchParams.get('tab') as TabId) || 'overview';
 
   const setTab = (tab: TabId) => {
     const url = new URL(window.location.href);
@@ -264,6 +266,12 @@ export default function WorkspacePage() {
         <AgentsSidebar workspaceId={workspace.id} />
 
         {/* Main Content Area — tab-dependent */}
+        {activeTab === 'overview' && (
+          <DashboardHome
+            workspaceId={workspace.id}
+            onNavigateToPipelines={() => setTab('pipelines')}
+          />
+        )}
         {activeTab === 'pipelines' && (
           <PipelineView workspaceId={workspace.id} />
         )}
