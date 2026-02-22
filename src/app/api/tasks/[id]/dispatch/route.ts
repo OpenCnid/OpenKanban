@@ -173,7 +173,7 @@ If you need help or clarification, ask the orchestrator.`;
       // Use sessionKey for routing to the agent's session
       // Format: agent:main:{openclaw_session_id}
       const sessionKey = `agent:main:${session.openclaw_session_id}`;
-      await client.call('chat.send', {
+      await client.call('chat_send', {
         sessionKey,
         message: taskMessage,
         idempotencyKey: `dispatch-${task.id}-${Date.now()}`

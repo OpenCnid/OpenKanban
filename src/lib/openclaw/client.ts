@@ -435,26 +435,55 @@ export class OpenClawClient extends EventEmitter {
 
   // Session management methods
   async listSessions(): Promise<OpenClawSessionInfo[]> {
-    return this.call<OpenClawSessionInfo[]>('sessions.list');
+    return this.call<OpenClawSessionInfo[]>('sessions_list');
   }
 
   async getSessionHistory(sessionId: string): Promise<unknown[]> {
-    return this.call<unknown[]>('sessions.history', { session_id: sessionId });
+    return this.call<unknown[]>('sessions_history', { session_id: sessionId });
   }
 
   async sendMessage(sessionId: string, content: string): Promise<void> {
-    await this.call('sessions.send', { session_id: sessionId, content });
+    await this.call('sessions_send', { session_id: sessionId, content });
   }
 
   async createSession(channel: string, peer?: string): Promise<OpenClawSessionInfo> {
-    return this.call<OpenClawSessionInfo>('sessions.create', { channel, peer });
+    return this.call<OpenClawSessionInfo>('sessions_create', { channel, peer });
   }
 
   // Workflow execution methods
+  // These use the HTTP /tools/invoke endpoint because sessions_spawn and
+  // sessions_send are on the WebSocket RPC deny list for UI clients.
+  // Gateway config must allow these via: gateway.tools.allow: ["sessions_spawn", "sessions_send"]
+
+  private get httpBaseUrl(): string {
+    // Convert ws:// to http:// for REST calls
+    return this.url.replace(/^ws(s)?:\/\//, 'http$1://');
+  }
+
+  private async invokeToolHttp<T = unknown>(tool: string, args: Record<string, unknown> = {}): Promise<T> {
+    const url = `${this.httpBaseUrl}/tools/invoke`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.token ? { 'Authorization': `Bearer ${this.token}` } : {}),
+      },
+      body: JSON.stringify({ tool, args }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || data.ok === false) {
+      const errorMsg = data.error?.message || data.error || `HTTP ${response.status}`;
+      throw new Error(`Tool invoke failed (${tool}): ${errorMsg}`);
+    }
+
+    return (data.result ?? data) as T;
+  }
 
   /**
    * Spawn a sub-agent session to execute a workflow step.
-   * Returns the spawned session info including sessionKey.
+   * Uses HTTP /tools/invoke (sessions_spawn must be allowed in gateway.tools.allow).
    */
   async spawnSession(params: {
     task: string;
@@ -465,11 +494,12 @@ export class OpenClawClient extends EventEmitter {
     timeoutSeconds?: number;
     cleanup?: 'delete' | 'keep';
   }): Promise<{ sessionKey: string; [key: string]: unknown }> {
-    return this.call<{ sessionKey: string; [key: string]: unknown }>('sessions.spawn', params);
+    return this.invokeToolHttp<{ sessionKey: string; [key: string]: unknown }>('sessions_spawn', params);
   }
 
   /**
    * Send a message to an existing session (e.g., approval/rejection to a waiting step).
+   * Uses HTTP /tools/invoke (sessions_send must be allowed in gateway.tools.allow).
    */
   async sendToSession(params: {
     sessionKey?: string;
@@ -477,33 +507,33 @@ export class OpenClawClient extends EventEmitter {
     message: string;
     timeoutSeconds?: number;
   }): Promise<unknown> {
-    return this.call('sessions.send', params);
+    return this.invokeToolHttp('sessions_send', params);
   }
 
   /**
    * List sub-agent sessions, optionally filtering by recent activity.
    */
   async listSubagents(params?: { recentMinutes?: number }): Promise<unknown[]> {
-    return this.call<unknown[]>('subagents.list', params);
+    return this.invokeToolHttp<unknown[]>('subagents', { action: 'list', ...params });
   }
 
   /**
    * Kill a running sub-agent session.
    */
   async killSubagent(target: string): Promise<void> {
-    await this.call('subagents.kill', { target });
+    await this.invokeToolHttp('subagents', { action: 'kill', target });
   }
 
   /**
    * Get session history for a sub-agent.
    */
   async getSubagentHistory(sessionKey: string, params?: { limit?: number; includeTools?: boolean }): Promise<unknown[]> {
-    return this.call<unknown[]>('sessions.history', { sessionKey, ...params });
+    return this.invokeToolHttp<unknown[]>('sessions_history', { sessionKey, ...params });
   }
 
   // Agent methods
   async listAgents(): Promise<unknown[]> {
-    const result = await this.call<{ agents?: unknown[] }>('agents.list');
+    const result = await this.call<{ agents?: unknown[] }>('agents_list');
     // Gateway returns { requester, allowAny, agents: [...] }
     if (result && typeof result === 'object' && Array.isArray((result as Record<string, unknown>).agents)) {
       return (result as Record<string, unknown>).agents as unknown[];
@@ -517,11 +547,11 @@ export class OpenClawClient extends EventEmitter {
 
   // Node methods (device capabilities)
   async listNodes(): Promise<unknown[]> {
-    return this.call<unknown[]>('node.list');
+    return this.call<unknown[]>('node_list');
   }
 
   async describeNode(nodeId: string): Promise<unknown> {
-    return this.call('node.describe', { node_id: nodeId });
+    return this.call('node_describe', { node_id: nodeId });
   }
 
   disconnect(): void {

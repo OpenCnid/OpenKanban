@@ -44,9 +44,9 @@ function getRunTasks(runId: string): Task[] {
 /**
  * Get deliverables for a task (artifacts from previous steps).
  */
-function getTaskDeliverables(taskId: string): Array<{ title: string; path: string; content?: string }> {
-  return queryAll<{ title: string; path: string; content?: string }>(
-    `SELECT title, path, content FROM task_deliverables WHERE task_id = ?`,
+function getTaskDeliverables(taskId: string): Array<{ title: string; path: string; description?: string }> {
+  return queryAll<{ title: string; path: string; description?: string }>(
+    `SELECT title, path, description FROM task_deliverables WHERE task_id = ?`,
     [taskId]
   );
 }
@@ -54,9 +54,9 @@ function getTaskDeliverables(taskId: string): Array<{ title: string; path: strin
 /**
  * Get input deliverables for a task (artifacts passed from upstream steps).
  */
-function getInputDeliverables(taskId: string): Array<{ title: string; path: string; content?: string; source_task_id: string }> {
-  return queryAll<{ title: string; path: string; content?: string; source_task_id: string }>(
-    `SELECT title, path, content, source_task_id FROM task_deliverables WHERE task_id = ? AND is_input = 1`,
+function getInputDeliverables(taskId: string): Array<{ title: string; path: string; description?: string; source_task_id: string }> {
+  return queryAll<{ title: string; path: string; description?: string; source_task_id: string }>(
+    `SELECT title, path, description, source_task_id FROM task_deliverables WHERE task_id = ? AND is_input = 1`,
     [taskId]
   );
 }
@@ -222,7 +222,7 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
       for (const d of depDeliverables) {
         upstreamArtifacts.push({
           title: d.title,
-          content: d.content || undefined,
+          content: d.description || undefined,
           source_step: depTask?.title,
         });
       }

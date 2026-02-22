@@ -155,7 +155,7 @@ Respond with ONLY valid JSON in this format:
     }
 
     // Send planning request to the planning session
-    await client.call('chat.send', {
+    await client.call('chat_send', {
       sessionKey: sessionKey,
       message: planningPrompt,
       idempotencyKey: `planning-start-${taskId}-${Date.now()}`,

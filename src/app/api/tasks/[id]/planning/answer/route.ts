@@ -96,7 +96,7 @@ If planning is complete, respond with JSON:
     console.log('[Planning Answer] Answer text:', answerText);
 
     try {
-      const sendResult = await client.call('chat.send', {
+      const sendResult = await client.call('chat_send', {
         sessionKey: task.planning_session_key,
         message: answerPrompt,
         idempotencyKey: `planning-answer-${taskId}-${Date.now()}`,
