@@ -350,6 +350,28 @@ const migrations: Migration[] = [
 
       console.log('[Migration 008] Workflow tables created');
     }
+  },
+  {
+    id: '009',
+    name: 'add_workflow_counterexamples',
+    up: (db) => {
+      console.log('[Migration 009] Adding workflow_counterexamples table...');
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS workflow_counterexamples (
+          id TEXT PRIMARY KEY,
+          template_id TEXT REFERENCES workflow_templates(id),
+          run_id TEXT REFERENCES workflow_runs(id),
+          failure_type TEXT NOT NULL,
+          description TEXT,
+          resolution TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_counterex_template ON workflow_counterexamples(template_id);
+      `);
+
+      console.log('[Migration 009] workflow_counterexamples table created');
+    }
   }
 ];
 

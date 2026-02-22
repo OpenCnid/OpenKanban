@@ -16,6 +16,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { queryOne, queryAll, run } from '@/lib/db';
 import { getOpenClawClient } from '@/lib/openclaw/client';
 import { broadcast } from '@/lib/events';
+import { recordOutcome } from '@/lib/workflow-intelligence';
 import type { Task, WorkflowRun, WorkflowStep, WorkflowTemplate, Approval } from '@/lib/types';
 
 // Track active step sessions: taskId → sessionKey
@@ -277,6 +278,7 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
 
       // If we can't execute, fail the run
       updateRunStatus(runId, 'failed', { outcome: `Step "${step.name}" failed to start: ${err instanceof Error ? err.message : 'Unknown error'}` });
+      recordOutcome(runId);
 
       return { executed: false, error: err instanceof Error ? err.message : 'Unknown error' };
     }
@@ -287,12 +289,8 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
   if (allDone) {
     updateRunStatus(runId, 'completed', { outcome: 'All steps completed successfully' });
 
-    // Update template success rate
-    const templateRuns = queryAll<{ status: string }>('SELECT status FROM workflow_runs WHERE template_id = ?', [template.id]);
-    const completedCount = templateRuns.filter(r => r.status === 'completed').length;
-    const totalCount = templateRuns.length;
-    const successRate = totalCount > 0 ? completedCount / totalCount : null;
-    run('UPDATE workflow_templates SET success_rate = ? WHERE id = ?', [successRate, template.id]);
+    // Record outcome + update template stats via intelligence module
+    recordOutcome(runId);
 
     console.log(`[WorkflowEngine] Run ${runId} completed successfully`);
   }
@@ -448,6 +446,9 @@ export async function rejectStep(taskId: string, notes?: string): Promise<{ succ
   // Fail the run
   updateRunStatus(task.workflow_run_id, 'failed', { outcome: `Step "${task.title}" rejected${notes ? ': ' + notes : ''}` });
 
+  // Record outcome for intelligence tracking
+  recordOutcome(task.workflow_run_id);
+
   return { success: true };
 }
 
@@ -483,6 +484,10 @@ export async function cancelRun(runId: string): Promise<{ success: boolean; erro
   }
 
   updateRunStatus(runId, 'cancelled', { outcome: 'Cancelled by user' });
+
+  // Record outcome for intelligence tracking
+  recordOutcome(runId);
+
   return { success: true };
 }
 

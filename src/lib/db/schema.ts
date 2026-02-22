@@ -268,6 +268,17 @@ CREATE TABLE IF NOT EXISTS alerts (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Workflow counterexamples (failures worth remembering)
+CREATE TABLE IF NOT EXISTS workflow_counterexamples (
+  id TEXT PRIMARY KEY,
+  template_id TEXT REFERENCES workflow_templates(id),
+  run_id TEXT REFERENCES workflow_runs(id),
+  failure_type TEXT NOT NULL,
+  description TEXT,
+  resolution TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_agent_id);
