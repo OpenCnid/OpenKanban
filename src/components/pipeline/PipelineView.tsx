@@ -39,6 +39,7 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
   const [showMissionPrompt, setShowMissionPrompt] = useState(false);
   const [completedRun, setCompletedRun] = useState<{ id: string; name: string } | null>(null);
   const [historyRuns, setHistoryRuns] = useState<WorkflowRun[]>([]);
+  const [historyCount, setHistoryCount] = useState(0);
   const [reviewToast, setReviewToast] = useState<ReviewToast | null>(null);
   const [highlightRunId, setHighlightRunId] = useState<string | null>(null);
 
@@ -90,13 +91,31 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
     return () => clearTimeout(timeout);
   }, [reviewToast]);
 
+  // Fetch history count on mount (so the tab badge is populated)
+  useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const res = await fetch(`/api/workflows/runs?workspace_id=${workspaceId}&include=all`);
+        if (res.ok) {
+          const data = await res.json();
+          setHistoryCount(data.length);
+        }
+      } catch { /* silent */ }
+    };
+    fetchCount();
+  }, [workspaceId]);
+
   // Fetch all runs (including dismissed) when history filter is active
   useEffect(() => {
     if (filter !== 'history') return;
     const fetchHistory = async () => {
       try {
         const res = await fetch(`/api/workflows/runs?workspace_id=${workspaceId}&include=all`);
-        if (res.ok) setHistoryRuns(await res.json());
+        if (res.ok) {
+          const data = await res.json();
+          setHistoryRuns(data);
+          setHistoryCount(data.length);
+        }
       } catch { /* silent */ }
     };
     fetchHistory();
@@ -184,30 +203,43 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
   }, [sourceRuns, tasks, workflowTemplates]);
 
   const filteredRuns = useMemo(() => {
-    if (filter === 'all') return pipelineRuns;
     if (filter === 'history') return pipelineRuns; // History shows all runs unfiltered
+    if (filter === 'all') {
+      // "Active" = running or paused only (not completed/failed/cancelled)
+      return pipelineRuns.filter((r) =>
+        r.status === 'running' || r.status === 'paused' || r.status === 'pending'
+      );
+    }
     return pipelineRuns.filter((r) => {
       if (filter === 'running') return r.status === 'running' || r.status === 'paused';
       return r.status === filter;
     });
   }, [pipelineRuns, filter]);
 
-  // Counts based on the active (non-dismissed) runs only
-  const activeRuns = useMemo((): PipelineRunData[] => {
-    // When we're in history mode, pipelineRuns has ALL runs — count active from store
-    const runs = filter === 'history'
-      ? pipelineRuns.filter(r => !workflowRuns.find(wr => wr.id === r.id)?.dismissed)
-      : pipelineRuns;
-    return runs;
-  }, [filter, pipelineRuns, workflowRuns]);
+  // Counts use the non-dismissed store runs (not affected by history filter)
+  // Build pipeline data from store runs for counting
+  const storeRunsData = useMemo((): PipelineRunData[] => {
+    return workflowRuns.map((run) => {
+      let cardStatus: PipelineRunData['status'] = 'running';
+      switch (run.status) {
+        case 'completed': cardStatus = 'completed'; break;
+        case 'failed': cardStatus = 'failed'; break;
+        case 'paused': cardStatus = 'paused'; break;
+        case 'pending': cardStatus = 'pending'; break;
+        case 'cancelled': cardStatus = 'cancelled'; break;
+        default: cardStatus = 'running';
+      }
+      return { id: run.id, name: run.name, icon: '⚡', status: cardStatus, steps: [], startedAt: run.started_at };
+    });
+  }, [workflowRuns]);
 
   const counts = useMemo(() => ({
-    all: activeRuns.length,
-    running: activeRuns.filter((r) => r.status === 'running' || r.status === 'paused').length,
-    completed: activeRuns.filter((r) => r.status === 'completed').length,
-    failed: activeRuns.filter((r) => r.status === 'failed' || r.status === 'cancelled').length,
-    history: historyRuns.length,
-  }), [activeRuns, historyRuns]);
+    all: storeRunsData.filter((r) => r.status === 'running' || r.status === 'paused' || r.status === 'pending').length,
+    running: storeRunsData.filter((r) => r.status === 'running' || r.status === 'paused').length,
+    completed: storeRunsData.filter((r) => r.status === 'completed').length,
+    failed: storeRunsData.filter((r) => r.status === 'failed' || r.status === 'cancelled').length,
+    history: historyCount,
+  }), [storeRunsData, historyCount]);
 
   const handleLaunchMission = useCallback(async (input: string, options?: { templateId?: string }) => {
     try {
