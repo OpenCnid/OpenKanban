@@ -1,0 +1,22 @@
+{
+  "highRelevance": [
+    "options", "calls", "puts", "strike", "expiration",
+    "SPY", "QQQ", "NVDA", "AAPL", "TSLA", "AMD", "META",
+    "support", "resistance", "breakout", "breakdown",
+    "earnings", "IV", "implied volatility", "gamma",
+    "unusual activity", "dark pool", "flow",
+    "weekly", "0DTE", "scalp"
+  ],
+  "mediumRelevance": [
+    "chart", "analysis", "setup", "trade", "entry", "exit",
+    "bullish", "bearish", "neutral", "spread",
+    "RSI", "MACD", "moving average", "volume",
+    "sector", "rotation", "momentum",
+    "watchlist", "scanner", "screener"
+  ],
+  "exclude": [
+    "giveaway", "unboxing", "vlog", "day in my life",
+    "beginner", "what is a stock", "how to open",
+    "crypto", "forex", "NFT", "memecoin"
+  ]
+}

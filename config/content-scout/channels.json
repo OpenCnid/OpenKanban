@@ -1,0 +1,4 @@
+{
+  "channels": [],
+  "_note": "Populate with Hans's competitor YouTube channels. Format: { id, name, slug, url, priority: high|medium|low, status: active }"
+}

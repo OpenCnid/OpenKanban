@@ -1,0 +1,8 @@
+yt-dlp>=2024.1.0
+Pillow>=10.0
+imagehash>=4.3
+openai>=1.0
+anthropic>=0.30
+notion-client>=2.0
+python-slugify>=8.0
+requests>=2.31
