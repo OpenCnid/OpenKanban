@@ -382,6 +382,7 @@ def main() -> int:
                 raise
 
     fatal_error = False
+    upstream_rerun = False  # Track if any upstream step was re-executed
 
     for step in steps:
         if args.video_url and step.name == "select":
@@ -389,9 +390,12 @@ def main() -> int:
 
         existing = state["steps"].get(step.name, {})
         status = existing.get("status")
-        if status == "completed" and not args.force:
+        if status == "completed" and not args.force and not upstream_rerun:
             LOGGER.info("Skipping completed step: %s", step.name)
             continue
+
+        if status == "completed" and upstream_rerun:
+            LOGGER.info("Re-running %s because an upstream step was re-executed", step.name)
 
         mark_step(state, step.name, "running", "")
         persist()
@@ -400,6 +404,7 @@ def main() -> int:
         if code == 0:
             mark_step(state, step.name, "completed", message)
             persist()
+            upstream_rerun = True  # This step ran, so downstream steps need re-running
             continue
 
         if step.optional or step.name in {"notion", "transcribe"}:
