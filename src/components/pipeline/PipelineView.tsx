@@ -284,6 +284,25 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
     }
   }, [workspaceId, setWorkflowRuns]);
 
+  const handleDismissRun = useCallback(async (runId: string) => {
+    try {
+      const res = await fetch(`/api/workflows/runs/${runId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        console.error('Failed to dismiss run:', await res.text());
+        return;
+      }
+      // Remove from local state immediately
+      useMissionControl.getState().setWorkflowRuns(
+        useMissionControl.getState().workflowRuns.filter(r => r.id !== runId)
+      );
+      useMissionControl.getState().setTasks(
+        useMissionControl.getState().tasks.filter(t => t.workflow_run_id !== runId)
+      );
+    } catch (error) {
+      console.error('Failed to dismiss run:', error);
+    }
+  }, []);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
@@ -328,6 +347,7 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
               onApproveStep={handleApproveStep}
               onRejectStep={handleRejectStep}
               onCancelRun={handleCancelRun}
+              onDismissRun={handleDismissRun}
               onViewResults={(id, name) => setCompletedRun({ id, name })}
             />
           ))

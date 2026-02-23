@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { XCircle, FileText } from 'lucide-react';
+import { XCircle, FileText, Trash2 } from 'lucide-react';
 import { PipelineStepChain, type PipelineStep } from './PipelineStepChain';
 import { PipelineStepDetail, type StepDetailData } from './PipelineStepDetail';
 
@@ -27,6 +27,7 @@ interface PipelineCardProps {
   onRejectStep?: (runId: string, taskId: string) => void;
   onCancelRun?: (runId: string) => void;
   onViewResults?: (runId: string, runName: string) => void;
+  onDismissRun?: (runId: string) => void;
 }
 
 const statusConfig: Record<PipelineRunStatus, { label: string; color: string; dot: string }> = {
@@ -38,7 +39,7 @@ const statusConfig: Record<PipelineRunStatus, { label: string; color: string; do
   cancelled: { label: 'Cancelled', color: 'text-mc-text-secondary/50', dot: 'bg-mc-text-secondary/50' },
 };
 
-export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun, onViewResults }: PipelineCardProps) {
+export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun, onViewResults, onDismissRun }: PipelineCardProps) {
   const [selectedStep, setSelectedStep] = useState<number | null>(null);
   const config = statusConfig[run.status] || statusConfig.pending;
   const completedSteps = run.steps.filter((s) => s.state === 'complete').length;
@@ -102,6 +103,15 @@ export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun, on
               title="Cancel pipeline"
             >
               <XCircle className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {(run.status === 'completed' || run.status === 'cancelled' || run.status === 'failed') && onDismissRun && (
+            <button
+              onClick={() => onDismissRun(run.id)}
+              className="p-1 hover:bg-red-500/10 rounded text-mc-text-secondary/30 hover:text-red-400 transition-colors"
+              title="Remove pipeline"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
           <div className={`flex items-center gap-1.5 text-xs ${config.color}`}>
