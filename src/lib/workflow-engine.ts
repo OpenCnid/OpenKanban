@@ -191,6 +191,14 @@ function buildStepPrompt(
  * Execute the next ready step in a workflow run.
  * A step is "ready" when all its dependencies are complete and it's in 'inbox' status.
  */
+/**
+ * Get the current status of a workflow run.
+ */
+export function getRunStatus(runId: string): string | null {
+  const run = queryOne<WorkflowRun>('SELECT status FROM workflow_runs WHERE id = ?', [runId]);
+  return run?.status ?? null;
+}
+
 export async function executeNextStep(runId: string): Promise<{ executed: boolean; taskId?: string; error?: string }> {
   const workflowRun = queryOne<WorkflowRun>('SELECT * FROM workflow_runs WHERE id = ?', [runId]);
   if (!workflowRun) {
@@ -342,9 +350,20 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
         }
 
         if (agent.status === 'failed' || agent.status === 'error') {
+          // Try to extract output even from "failed" agents — they may have produced
+          // useful output before failing (e.g., tool error after response was written)
+          const agentKey = String(agent.sessionKey || sessionKey);
+          const failedOutput = await extractSessionOutput(client, agentKey);
           inlineWatchedTasks.delete(task.id);
-          handleStepFailure(task.id, 'Agent failed');
-          try { await client.killSubagent(String(agent.sessionKey || sessionKey)); } catch {}
+
+          if (failedOutput && failedOutput.length > 50) {
+            // Agent produced substantial output — treat as success despite status
+            console.log(`[WorkflowEngine] Step "${step.name}" status=${agent.status} but has output (${failedOutput.length} chars) — treating as success`);
+            await handleStepCompletion(task.id, failedOutput.slice(0, 5000));
+          } else {
+            handleStepFailure(task.id, String(agent.result || 'Agent failed'));
+          }
+          try { await client.killSubagent(agentKey); } catch {}
           activeStepSessions.delete(task.id);
           return { executed: true, taskId: task.id };
         }
@@ -643,8 +662,16 @@ async function watchStepCompletion(
       }
 
       if (agent.status === 'failed' || agent.status === 'error') {
-        handleStepFailure(taskId, 'Agent failed');
-        try { await client.killSubagent(String(agent.sessionKey || sessionKey)); } catch {}
+        // Try extracting output even from "failed" agents
+        const agentKey = String(agent.sessionKey || sessionKey);
+        const failedOutput = await extractSessionOutput(client, agentKey);
+        if (failedOutput && failedOutput.length > 50) {
+          console.log(`[WorkflowEngine] Watcher: step ${taskId} status=${agent.status} but has output (${failedOutput.length} chars) — treating as success`);
+          await handleStepCompletion(taskId, failedOutput.slice(0, 5000));
+        } else {
+          handleStepFailure(taskId, String(agent.result || 'Agent failed'));
+        }
+        try { await client.killSubagent(agentKey); } catch {}
         activeStepSessions.delete(taskId);
         return;
       }
@@ -878,11 +905,19 @@ async function pollActiveSteps(): Promise<void> {
           // Already cleaned up
         }
       } else if (agent.status === 'failed' || agent.status === 'error') {
-        console.error(`[WorkflowEngine] Sub-agent ${sessionKey} failed for task ${taskId}`);
-        handleStepFailure(taskId, agent.result || 'Sub-agent failed');
+        // Try extracting output even from "failed" agents
+        const agentKey = agent.sessionKey || sessionKey;
+        const failedOutput = await extractSessionOutput(client, agentKey);
+        if (failedOutput && failedOutput.length > 50) {
+          console.log(`[WorkflowEngine] Poller: agent ${sessionKey} status=${agent.status} but has output (${failedOutput.length} chars) — treating as success`);
+          await handleStepCompletion(taskId, failedOutput.slice(0, 5000));
+        } else {
+          console.error(`[WorkflowEngine] Sub-agent ${sessionKey} failed for task ${taskId}`);
+          handleStepFailure(taskId, agent.result || 'Sub-agent failed');
+        }
 
         try {
-          await client.killSubagent(agent.sessionKey || sessionKey);
+          await client.killSubagent(agentKey);
         } catch { /* ignore */ }
       }
     }
