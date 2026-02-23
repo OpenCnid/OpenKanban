@@ -385,6 +385,30 @@ const migrations: Migration[] = [
         console.log('[Migration 010] Added dismissed to workflow_runs');
       }
     }
+  },
+  {
+    id: '011',
+    name: 'add_task_step_timing_and_retry_count',
+    up: (db) => {
+      console.log('[Migration 011] Adding step timing + retry_count columns to tasks...');
+
+      const tasksInfo = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+
+      if (!tasksInfo.some(col => col.name === 'started_at')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN started_at TEXT`);
+        console.log('[Migration 011] Added started_at to tasks');
+      }
+
+      if (!tasksInfo.some(col => col.name === 'completed_at')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN completed_at TEXT`);
+        console.log('[Migration 011] Added completed_at to tasks');
+      }
+
+      if (!tasksInfo.some(col => col.name === 'retry_count')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN retry_count INTEGER DEFAULT 0`);
+        console.log('[Migration 011] Added retry_count to tasks');
+      }
+    }
   }
 ];
 

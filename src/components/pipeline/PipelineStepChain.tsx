@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
+
 export type StepState = 'complete' | 'running' | 'waiting' | 'pending' | 'review' | 'failed';
 
 export interface PipelineStep {
@@ -7,12 +9,16 @@ export interface PipelineStep {
   state: StepState;
   taskId?: string;
   agentId?: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 interface PipelineStepChainProps {
   steps: PipelineStep[];
   selectedStepIndex?: number | null;
   onStepClick?: (index: number) => void;
+  onApproveReviewStep?: (taskId: string) => void;
+  onRejectReviewStep?: (taskId: string) => void;
 }
 
 const agentEmoji: Record<string, string> = {
@@ -30,13 +36,57 @@ const stateConfig: Record<StepState, { icon: string; bg: string; text: string; p
   failed: { icon: '❌', bg: 'bg-red-500/20 border-red-500/40', text: 'text-red-400' },
 };
 
-export function PipelineStepChain({ steps, selectedStepIndex, onStepClick }: PipelineStepChainProps) {
+function formatDuration(startedAt?: string, completedAt?: string, nowMs: number = Date.now()): string | null {
+  if (!startedAt) return null;
+
+  const startMs = new Date(startedAt).getTime();
+  if (Number.isNaN(startMs)) return null;
+
+  const endMs = completedAt ? new Date(completedAt).getTime() : nowMs;
+  if (Number.isNaN(endMs)) return null;
+
+  const diffSeconds = Math.max(0, Math.floor((endMs - startMs) / 1000));
+  const hours = Math.floor(diffSeconds / 3600);
+  const minutes = Math.floor((diffSeconds % 3600) / 60);
+  const seconds = diffSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+export function PipelineStepChain({
+  steps,
+  selectedStepIndex,
+  onStepClick,
+  onApproveReviewStep,
+  onRejectReviewStep,
+}: PipelineStepChainProps) {
+  const hasRunningStep = useMemo(
+    () => steps.some((s) => s.state === 'running' && !!s.startedAt),
+    [steps]
+  );
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!hasRunningStep) return;
+
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [hasRunningStep]);
+
   return (
     <div className="flex items-center gap-1 overflow-x-auto">
       {steps.map((step, i) => {
         const config = stateConfig[step.state];
         const isSelected = selectedStepIndex === i;
         const isClickable = !!onStepClick;
+        const reviewTaskId = step.taskId;
+        const duration = step.state === 'complete'
+          ? formatDuration(step.startedAt, step.completedAt)
+          : step.state === 'running'
+            ? formatDuration(step.startedAt, undefined, nowMs)
+            : null;
 
         return (
           <div key={i} className="flex items-center gap-1 flex-shrink-0">
@@ -61,7 +111,34 @@ export function PipelineStepChain({ steps, selectedStepIndex, onStepClick }: Pip
               <span className="text-xs">{config.icon}</span>
               {step.agentId && <span className="text-xs opacity-70" title={step.agentId}>{agentEmoji[step.agentId] || '🤖'}</span>}
               <span className="truncate max-w-[100px]">{step.name}</span>
+              {duration && (
+                <span className="font-mono text-[10px] opacity-80">
+                  {duration}
+                </span>
+              )}
             </button>
+            {step.state === 'review' && reviewTaskId && (
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => onApproveReviewStep?.(reviewTaskId)}
+                  disabled={!onApproveReviewStep}
+                  className="w-5 h-5 flex items-center justify-center rounded border border-green-500/50 bg-green-500/10 text-green-400 text-[10px] hover:bg-green-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={`Approve ${step.name}`}
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRejectReviewStep?.(reviewTaskId)}
+                  disabled={!onRejectReviewStep}
+                  className="w-5 h-5 flex items-center justify-center rounded border border-red-500/50 bg-red-500/10 text-red-400 text-[10px] hover:bg-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={`Reject ${step.name}`}
+                >
+                  ✗
+                </button>
+              </div>
+            )}
           </div>
         );
       })}

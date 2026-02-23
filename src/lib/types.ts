@@ -66,6 +66,9 @@ export interface Task {
   due_date?: string;
   workflow_run_id?: string;
   workflow_step_index?: number;
+  started_at?: string;
+  completed_at?: string;
+  retry_count?: number;
   created_at: string;
   updated_at: string;
   // Joined fields
@@ -249,6 +252,8 @@ export interface WorkflowStep {
   agent_role?: string;
   agentId?: string;          // OpenClaw agent ID (e.g., "market-data", "analyst", "recorder")
   model?: string;            // Optional model override (e.g., "anthropic/claude-opus-4-6")
+  timeoutSeconds?: number;
+  maxRetries?: number;
   tools?: string[];
   depends_on?: string;
   review?: boolean;

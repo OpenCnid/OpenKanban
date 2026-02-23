@@ -9,9 +9,9 @@ const EXAMPLE_TEMPLATES = [
     icon: '🎬',
     trigger_type: 'manual',
     steps: [
-      { name: 'Extract Transcript', agent_role: 'transcriber', tools: ['youtube-transcript'] },
+      { name: 'Extract Transcript', agent_role: 'transcriber', tools: ['youtube-transcript'], timeoutSeconds: 300, maxRetries: 1 },
       { name: 'Summarize Key Points', agent_role: 'analyst', depends_on: 'Extract Transcript' },
-      { name: 'Generate Gamma Deck', agent_role: 'designer', depends_on: 'Summarize Key Points', review: true },
+      { name: 'Generate Gamma Deck', agent_role: 'designer', depends_on: 'Summarize Key Points', review: true, timeoutSeconds: 300 },
       { name: 'Distribute', agent_role: 'distributor', depends_on: 'Generate Gamma Deck', destinations: ['discord', 'notion'] },
     ],
   },
@@ -21,8 +21,8 @@ const EXAMPLE_TEMPLATES = [
     icon: '📈',
     trigger_type: 'manual',
     steps: [
-      { name: 'Market Data Pull', agent_role: 'data-fetcher', agentId: 'market-data' },
-      { name: 'Analysis', agent_role: 'analyst', agentId: 'analyst', depends_on: 'Market Data Pull', review: true },
+      { name: 'Market Data Pull', agent_role: 'data-fetcher', agentId: 'market-data', timeoutSeconds: 600, maxRetries: 1 },
+      { name: 'Analysis', agent_role: 'analyst', agentId: 'analyst', depends_on: 'Market Data Pull', review: true, timeoutSeconds: 300 },
       { name: 'Log to Portfolio', agent_role: 'recorder', agentId: 'recorder', depends_on: 'Analysis' },
     ],
   },

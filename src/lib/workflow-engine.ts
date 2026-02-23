@@ -84,7 +84,22 @@ function getInputDeliverables(taskId: string): Array<{ title: string; path: stri
  */
 function updateTaskStatus(taskId: string, status: string): void {
   const now = new Date().toISOString();
-  run('UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?', [status, now, taskId]);
+  const updates = ['status = ?', 'updated_at = ?'];
+  const params: unknown[] = [status, now];
+
+  if (status === 'in_progress') {
+    updates.push('started_at = ?');
+    updates.push('completed_at = NULL');
+    params.push(now);
+  }
+
+  if (status === 'done' || status === 'review') {
+    updates.push('completed_at = ?');
+    params.push(now);
+  }
+
+  params.push(taskId);
+  run(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`, params);
 
   const updatedTask = queryOne<Task>(
     `SELECT t.*, aa.name as assigned_agent_name, aa.avatar_emoji as assigned_agent_emoji
@@ -237,6 +252,7 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
     // This task is ready — check if it's a review step
     const stepIndex = task.workflow_step_index ?? 0;
     const step = steps[stepIndex];
+    const stepTimeoutSeconds = step?.timeoutSeconds ?? 300;
 
     if (!step) continue;
 
@@ -293,7 +309,7 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
         agentId: step.agentId || undefined,
         model: step.model || (step.agentId ? undefined : 'anthropic/claude-sonnet-4-6'),
         cleanup: 'keep', // Keep so we can read history after completion
-        runTimeoutSeconds: 300,
+        runTimeoutSeconds: stepTimeoutSeconds,
       });
 
       const sessionKey = result.sessionKey || label;
@@ -312,7 +328,7 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
 
       // Poll until the sub-agent completes, then extract output
       // This runs inside the /execute endpoint which has its own HTTP request context
-      const maxWait = 300000; // 5 min
+      const maxWait = stepTimeoutSeconds * 1000;
       const pollMs = 4000;
       const start = Date.now();
 
@@ -371,8 +387,8 @@ export async function executeNextStep(runId: string): Promise<{ executed: boolea
 
       // Timeout
       inlineWatchedTasks.delete(task.id);
-      console.warn(`[WorkflowEngine] Step "${step.name}" timed out after 5 minutes`);
-      await handleStepCompletion(task.id, 'Agent timed out after 5 minutes');
+      console.warn(`[WorkflowEngine] Step "${step.name}" timed out after ${stepTimeoutSeconds}s`);
+      await handleStepCompletion(task.id, `Agent timed out after ${stepTimeoutSeconds} seconds`);
       return { executed: true, taskId: task.id };
     } catch (err) {
       console.error(`[WorkflowEngine] Failed to execute step "${step.name}":`, err);
@@ -626,7 +642,8 @@ async function watchStepCompletion(
   template: WorkflowTemplate
 ): Promise<void> {
   const client = getOpenClawClient();
-  const maxWait = 300000; // 5 min max
+  const stepTimeoutSeconds = step.timeoutSeconds ?? 300;
+  const maxWait = stepTimeoutSeconds * 1000;
   const pollInterval = 4000; // Check every 4s
   const startTime = Date.now();
 
@@ -682,7 +699,7 @@ async function watchStepCompletion(
 
   // Timeout
   console.warn(`[WorkflowEngine] Step watcher timed out for task ${taskId}`);
-  await handleStepCompletion(taskId, 'Agent timed out after 5 minutes');
+  await handleStepCompletion(taskId, `Agent timed out after ${stepTimeoutSeconds} seconds`);
 }
 
 async function extractSessionOutput(client: ReturnType<typeof getOpenClawClient>, sessionKey: string): Promise<string> {
@@ -1110,6 +1127,43 @@ function handleStepFailure(taskId: string, error: string): void {
 
   const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
   if (!task || task.status !== 'in_progress') return;
+
+  // Retry logic (default: no retries)
+  if (task.workflow_run_id) {
+    const template = queryOne<WorkflowTemplate>(
+      `SELECT wt.* FROM workflow_templates wt
+       JOIN workflow_runs wr ON wr.template_id = wt.id
+       WHERE wr.id = ?`,
+      [task.workflow_run_id]
+    );
+
+    if (template) {
+      const steps = parseSteps(template);
+      const step = steps[task.workflow_step_index ?? 0];
+      const maxRetries = step?.maxRetries ?? 0;
+      const currentRetry = task.retry_count ?? 0;
+
+      if (maxRetries > currentRetry) {
+        const retryCount = currentRetry + 1;
+        const now = new Date().toISOString();
+        const attemptNumber = retryCount + 1;
+        const totalAttempts = maxRetries + 1;
+
+        run('UPDATE tasks SET retry_count = ?, updated_at = ? WHERE id = ?', [retryCount, now, taskId]);
+        updateTaskStatus(taskId, 'inbox');
+
+        console.warn(`[WorkflowEngine] Step ${task.title} failed, retrying (attempt ${attemptNumber}/${totalAttempts})...`);
+
+        setTimeout(() => {
+          executeNextStep(task.workflow_run_id as string).catch((err) => {
+            console.error(`[WorkflowEngine] Retry execution failed for run ${task.workflow_run_id}:`, err);
+          });
+        }, 5000);
+
+        return;
+      }
+    }
+  }
 
   updateTaskStatus(taskId, 'inbox'); // Revert
 

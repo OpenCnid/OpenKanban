@@ -15,6 +15,11 @@ interface PipelineViewProps {
   workspaceId: string;
 }
 
+interface ReviewToast {
+  stepName: string;
+  runId?: string;
+}
+
 // Map task status to step chain state
 function taskStatusToStepState(status: TaskStatus): StepState {
   switch (status) {
@@ -34,21 +39,13 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
   const [showMissionPrompt, setShowMissionPrompt] = useState(false);
   const [completedRun, setCompletedRun] = useState<{ id: string; name: string } | null>(null);
   const [historyRuns, setHistoryRuns] = useState<WorkflowRun[]>([]);
+  const [reviewToast, setReviewToast] = useState<ReviewToast | null>(null);
+  const [highlightRunId, setHighlightRunId] = useState<string | null>(null);
 
   const { workflowRuns, workflowTemplates, tasks, setWorkflowRuns } = useMissionControl();
 
   // SSE-driven refresh — re-fetch runs + tasks when step/run events arrive
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (!detail) return;
-      const type = detail.type || '';
-      // Refresh on workflow-related events
-      if (type.includes('task') || type.includes('workflow') || type.includes('step') || type.includes('approval')) {
-        refreshData();
-      }
-    };
-
     const refreshData = async () => {
       try {
         const [runsRes, tasksRes] = await Promise.all([
@@ -62,9 +59,36 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
       }
     };
 
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+      const type = detail.type || '';
+
+      if (type === 'approval_created') {
+        const payload = detail.payload as Record<string, unknown> | undefined;
+        const rawTitle = typeof payload?.title === 'string' ? payload.title : '';
+        const stepName = rawTitle.replace(/^Review:\s*/i, '').trim() || 'Workflow step';
+        setReviewToast({
+          stepName,
+          runId: typeof payload?.workflow_run_id === 'string' ? payload.workflow_run_id : undefined,
+        });
+      }
+
+      // Refresh on workflow-related events
+      if (type.includes('task') || type.includes('workflow') || type.includes('step') || type.includes('approval')) {
+        refreshData();
+      }
+    };
+
     window.addEventListener('sse-event', handler);
     return () => window.removeEventListener('sse-event', handler);
   }, [workspaceId, setWorkflowRuns]);
+
+  useEffect(() => {
+    if (!reviewToast) return;
+    const timeout = setTimeout(() => setReviewToast(null), 8000);
+    return () => clearTimeout(timeout);
+  }, [reviewToast]);
 
   // Fetch all runs (including dismissed) when history filter is active
   useEffect(() => {
@@ -99,6 +123,8 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
           : taskStatusToStepState(t.status),
         taskId: t.id,
         agentId: templateSteps[t.workflow_step_index ?? i]?.agentId,
+        startedAt: t.started_at,
+        completedAt: t.completed_at,
       }));
 
       // Build step details for expandable view
@@ -111,6 +137,8 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         stepIndex: i,
         totalSteps: runTasks.length,
         description: t.description || undefined,
+        startedAt: t.started_at,
+        completedAt: t.completed_at,
         deliverables: [], // TODO: fetch from task_deliverables
         inputArtifacts: [], // TODO: fetch from task_deliverables where is_input=1
         runId: run.id,
@@ -325,6 +353,27 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
     }
   }, [workspaceId, setWorkflowRuns]);
 
+  const handleReviewToastClick = useCallback(() => {
+    if (!reviewToast?.runId) {
+      setReviewToast(null);
+      return;
+    }
+
+    const targetRunId = reviewToast.runId;
+    setReviewToast(null);
+    setFilter('all');
+    setHighlightRunId(targetRunId);
+
+    setTimeout(() => {
+      const target = document.getElementById(`pipeline-run-${targetRunId}`);
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+
+    setTimeout(() => {
+      setHighlightRunId((current) => (current === targetRunId ? null : current));
+    }, 2600);
+  }, [reviewToast]);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
@@ -349,6 +398,17 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         </button>
       </div>
 
+      {reviewToast && (
+        <div className="px-4 pt-3">
+          <button
+            onClick={handleReviewToastClick}
+            className="w-full text-left rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300 hover:bg-amber-500/15"
+          >
+            🔔 Review needed: {reviewToast.stepName}
+          </button>
+        </div>
+      )}
+
       {/* Pipeline list */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {filteredRuns.length === 0 ? (
@@ -363,15 +423,22 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
           </div>
         ) : (
           filteredRuns.map((run) => (
-            <PipelineCard
+            <div
               key={run.id}
-              run={run}
-              onApproveStep={handleApproveStep}
-              onRejectStep={handleRejectStep}
-              onCancelRun={handleCancelRun}
-              onDismissRun={handleDismissRun}
-              onViewResults={(id, name) => setCompletedRun({ id, name })}
-            />
+              id={`pipeline-run-${run.id}`}
+              className={`rounded-lg transition-shadow ${
+                highlightRunId === run.id ? 'ring-2 ring-amber-400/70 ring-offset-2 ring-offset-mc-bg' : ''
+              }`}
+            >
+              <PipelineCard
+                run={run}
+                onApproveStep={handleApproveStep}
+                onRejectStep={handleRejectStep}
+                onCancelRun={handleCancelRun}
+                onDismissRun={handleDismissRun}
+                onViewResults={(id, name) => setCompletedRun({ id, name })}
+              />
+            </div>
           ))
         )}
       </div>

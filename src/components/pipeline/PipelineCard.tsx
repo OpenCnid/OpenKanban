@@ -138,6 +138,8 @@ export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun, on
           steps={run.steps}
           selectedStepIndex={selectedStep}
           onStepClick={handleStepClick}
+          onApproveReviewStep={onApproveStep ? handleApprove : undefined}
+          onRejectReviewStep={onRejectStep ? handleReject : undefined}
         />
       </div>
 

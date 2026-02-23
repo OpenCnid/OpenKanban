@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { X, Check, XCircle, Square, Clock, Wrench, User, FileText, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import type { StepState } from './PipelineStepChain';
+import { MarkdownContent } from '@/components/ui/MarkdownContent';
 
 export interface StepDetailData {
   taskId: string;
@@ -51,10 +52,12 @@ export function PipelineStepDetail({ step, onClose, onApprove, onReject, onCance
   useEffect(() => {
     if (step.deliverables.length > 0) {
       setDeliverables(step.deliverables);
+      setLoadingDeliverables(false);
       return;
     }
 
     // Fetch deliverables from the task
+    setDeliverables([]);
     let cancelled = false;
     const fetchDeliverables = async () => {
       setLoadingDeliverables(true);
@@ -63,7 +66,9 @@ export function PipelineStepDetail({ step, onClose, onApprove, onReject, onCance
         if (res.ok && !cancelled) {
           const data = await res.json();
           if (Array.isArray(data) && data.length > 0) {
-            setDeliverables(data.map((d: Record<string, unknown>) => ({
+            setDeliverables(data
+              .filter((d: Record<string, unknown>) => !d.is_input)
+              .map((d: Record<string, unknown>) => ({
               title: (d.title as string) || (d.name as string) || 'Output',
               path: d.path as string | undefined,
               content: (d.description as string) || (d.content as string) || undefined,
@@ -80,6 +85,14 @@ export function PipelineStepDetail({ step, onClose, onApprove, onReject, onCance
     fetchDeliverables();
     return () => { cancelled = true; };
   }, [step.taskId, step.deliverables]);
+
+  const reviewOutput = useMemo(() => {
+    if (step.state !== 'review') return '';
+    const outputChunks = deliverables
+      .map((d) => d.content?.trim())
+      .filter((chunk): chunk is string => Boolean(chunk));
+    return outputChunks.join('\n\n---\n\n');
+  }, [deliverables, step.state]);
 
   const handleApprove = async () => {
     if (!onApprove) return;
@@ -184,35 +197,58 @@ export function PipelineStepDetail({ step, onClose, onApprove, onReject, onCance
         </div>
       )}
 
-      {/* Output deliverables */}
-      {loadingDeliverables ? (
-        <div className="mb-3 flex items-center gap-2 text-xs text-mc-text-secondary">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          Loading output...
-        </div>
-      ) : deliverables.length > 0 ? (
-        <div className="mb-3">
-          <h5 className="text-[10px] uppercase text-mc-text-secondary/50 mb-1 font-medium">Output</h5>
-          <div className="space-y-1">
-            {deliverables.map((d, i) => (
-              <div key={i} className="flex items-start gap-2 text-xs bg-mc-bg/50 rounded px-2 py-1.5 border border-mc-border/20">
-                <FileText className="w-3 h-3 text-green-400/60 flex-shrink-0 mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <span className="font-medium">{d.title}</span>
-                  {d.path && <span className="text-mc-text-secondary/50 text-[10px] ml-1">{d.path}</span>}
-                  {d.content && (
-                    <p className="text-mc-text-secondary/70 mt-0.5 text-[11px] whitespace-pre-wrap line-clamp-4">{d.content}</p>
-                  )}
-                </div>
-              </div>
-            ))}
+      {/* Output deliverables (non-review states) */}
+      {step.state !== 'review' && (
+        loadingDeliverables ? (
+          <div className="mb-3 flex items-center gap-2 text-xs text-mc-text-secondary">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Loading output...
           </div>
+        ) : deliverables.length > 0 ? (
+          <div className="mb-3">
+            <h5 className="text-[10px] uppercase text-mc-text-secondary/50 mb-1 font-medium">Output</h5>
+            <div className="space-y-1">
+              {deliverables.map((d, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs bg-mc-bg/50 rounded px-2 py-1.5 border border-mc-border/20">
+                  <FileText className="w-3 h-3 text-green-400/60 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <span className="font-medium">{d.title}</span>
+                    {d.path && <span className="text-mc-text-secondary/50 text-[10px] ml-1">{d.path}</span>}
+                    {d.content && (
+                      <p className="text-mc-text-secondary/70 mt-0.5 text-[11px] whitespace-pre-wrap line-clamp-4">{d.content}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : step.state === 'complete' ? (
+          <div className="mb-3 text-xs text-mc-text-secondary/40 italic">
+            No output artifacts recorded
+          </div>
+        ) : null
+      )}
+
+      {/* Review output preview */}
+      {step.state === 'review' && (
+        <div className="mb-3">
+          <h5 className="text-[10px] uppercase text-mc-text-secondary/50 mb-1 font-medium">Agent Output</h5>
+          {loadingDeliverables ? (
+            <div className="flex items-center gap-2 text-xs text-mc-text-secondary">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Loading output...
+            </div>
+          ) : reviewOutput ? (
+            <div className="max-h-56 overflow-y-auto rounded border border-mc-border/30 bg-mc-bg/60 px-2.5 py-2">
+              <MarkdownContent content={reviewOutput} />
+            </div>
+          ) : (
+            <div className="text-xs text-mc-text-secondary/40 italic">
+              No output artifacts recorded
+            </div>
+          )}
         </div>
-      ) : (step.state === 'complete' || step.state === 'review') ? (
-        <div className="mb-3 text-xs text-mc-text-secondary/40 italic">
-          No output artifacts recorded
-        </div>
-      ) : null}
+      )}
 
       {/* Action buttons */}
       <div className="flex items-center gap-2">
