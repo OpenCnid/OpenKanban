@@ -2,7 +2,7 @@
 
 export type AgentStatus = 'standby' | 'working' | 'offline';
 
-export type TaskStatus = 'planning' | 'inbox' | 'assigned' | 'in_progress' | 'testing' | 'review' | 'done';
+export type TaskStatus = 'planning' | 'inbox' | 'assigned' | 'in_progress' | 'testing' | 'review' | 'done' | 'failed';
 
 export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent';
 
@@ -69,6 +69,7 @@ export interface Task {
   started_at?: string;
   completed_at?: string;
   retry_count?: number;
+  error_message?: string;
   created_at: string;
   updated_at: string;
   // Joined fields

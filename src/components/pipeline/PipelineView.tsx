@@ -27,6 +27,7 @@ function taskStatusToStepState(status: TaskStatus): StepState {
     case 'in_progress': return 'running';
     case 'testing': return 'running';
     case 'review': return 'review';
+    case 'failed': return 'failed';
     case 'assigned': return 'waiting';
     case 'inbox': return 'pending';
     case 'planning': return 'pending';
@@ -137,20 +138,21 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
 
       const steps: PipelineStep[] = runTasks.map((t, i) => ({
         name: t.title,
-        state: run.status === 'failed' && t.status !== 'done'
+        state: run.status === 'failed' && t.status !== 'done' && t.status !== 'failed'
           ? 'failed' as StepState
           : taskStatusToStepState(t.status),
         taskId: t.id,
         agentId: templateSteps[t.workflow_step_index ?? i]?.agentId,
         startedAt: t.started_at,
         completedAt: t.completed_at,
+        errorMessage: t.error_message || undefined,
       }));
 
       // Build step details for expandable view
       const stepDetails: StepDetailData[] = runTasks.map((t, i) => ({
         taskId: t.id,
         name: t.title,
-        state: run.status === 'failed' && t.status !== 'done'
+        state: run.status === 'failed' && t.status !== 'done' && t.status !== 'failed'
           ? 'failed' as StepState
           : taskStatusToStepState(t.status),
         stepIndex: i,
@@ -158,6 +160,7 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         description: t.description || undefined,
         startedAt: t.started_at,
         completedAt: t.completed_at,
+        errorMessage: t.error_message || undefined,
         deliverables: [], // TODO: fetch from task_deliverables
         inputArtifacts: [], // TODO: fetch from task_deliverables where is_input=1
         runId: run.id,

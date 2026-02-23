@@ -409,6 +409,18 @@ const migrations: Migration[] = [
         console.log('[Migration 011] Added retry_count to tasks');
       }
     }
+  },
+  {
+    id: '012',
+    name: 'add_task_error_message',
+    up: (db) => {
+      console.log('[Migration 012] Adding error_message column to tasks...');
+      const tasksInfo = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+      if (!tasksInfo.some(col => col.name === 'error_message')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN error_message TEXT`);
+        console.log('[Migration 012] Added error_message to tasks');
+      }
+    }
   }
 ];
 

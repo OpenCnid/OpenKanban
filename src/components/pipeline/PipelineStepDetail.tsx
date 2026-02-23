@@ -19,6 +19,7 @@ export interface StepDetailData {
   deliverables: Array<{ title: string; path?: string; content?: string }>;
   inputArtifacts: Array<{ title: string; content?: string; sourceStep?: string }>;
   sessionKey?: string;
+  errorMessage?: string;
   runId: string;
 }
 
@@ -157,6 +158,19 @@ export function PipelineStepDetail({ step, onClose, onApprove, onReject, onCance
           </div>
         )}
       </div>
+
+      {/* Error message for failed steps */}
+      {step.state === 'failed' && step.errorMessage && (
+        <div className="mb-3 p-2.5 rounded border border-red-500/30 bg-red-500/5">
+          <div className="flex items-center gap-1.5 text-red-400 text-xs font-medium mb-1">
+            <XCircle className="w-3.5 h-3.5" />
+            Step Failed
+          </div>
+          <p className="text-xs text-red-300/80 leading-relaxed whitespace-pre-wrap">
+            {step.errorMessage}
+          </p>
+        </div>
+      )}
 
       {/* Step description / task details */}
       {step.description && (

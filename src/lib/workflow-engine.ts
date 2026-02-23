@@ -974,7 +974,7 @@ function writeRunOutput(runId: string): void {
 
     // Build the output file content
     const triggerInput = workflowRun.trigger_input || workflowRun.name || 'untitled';
-    const startedAt = workflowRun.started_at || workflowRun.created_at;
+    const startedAt = workflowRun.started_at || new Date().toISOString();
     const completedAt = workflowRun.completed_at || new Date().toISOString();
 
     const lines: string[] = [];
@@ -1165,7 +1165,11 @@ function handleStepFailure(taskId: string, error: string): void {
     }
   }
 
-  updateTaskStatus(taskId, 'inbox'); // Revert
+  // Mark the task as failed with the error message
+  updateTaskStatus(taskId, 'failed');
+  run('UPDATE tasks SET error_message = ? WHERE id = ?', [error.slice(0, 2000), taskId]);
+
+  broadcast({ type: 'task_updated', payload: { id: taskId, status: 'failed', error_message: error } });
 
   if (task.workflow_run_id) {
     updateRunStatus(task.workflow_run_id, 'failed', {

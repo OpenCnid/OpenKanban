@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   started_at TEXT,
   completed_at TEXT,
   retry_count INTEGER DEFAULT 0,
+  error_message TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );

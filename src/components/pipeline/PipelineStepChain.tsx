@@ -11,6 +11,7 @@ export interface PipelineStep {
   agentId?: string;
   startedAt?: string;
   completedAt?: string;
+  errorMessage?: string;
 }
 
 interface PipelineStepChainProps {
@@ -89,7 +90,7 @@ export function PipelineStepChain({
             : null;
 
         return (
-          <div key={i} className="flex items-center gap-1 flex-shrink-0">
+          <div key={i} className="relative flex items-center gap-1 flex-shrink-0">
             {i > 0 && (
               <div className={`w-4 h-px ${
                 step.state === 'complete' || step.state === 'running'
@@ -117,6 +118,11 @@ export function PipelineStepChain({
                 </span>
               )}
             </button>
+            {step.state === 'failed' && step.errorMessage && (
+              <div className="absolute top-full left-0 mt-1 z-10 max-w-[220px] px-2 py-1 rounded bg-red-500/10 border border-red-500/30 text-[10px] text-red-400 leading-tight whitespace-normal">
+                {step.errorMessage.length > 120 ? step.errorMessage.slice(0, 120) + '…' : step.errorMessage}
+              </div>
+            )}
             {step.state === 'review' && reviewTaskId && (
               <div className="flex items-center gap-0.5">
                 <button

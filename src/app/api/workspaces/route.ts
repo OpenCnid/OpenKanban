@@ -38,11 +38,12 @@ export async function GET(request: NextRequest) {
           testing: 0,
           review: 0,
           done: 0,
+          failed: 0,
           total: 0
         };
         
         taskCounts.forEach(tc => {
-          counts[tc.status] = tc.count;
+          if (tc.status in counts) counts[tc.status as keyof typeof counts] = tc.count;
           counts.total += tc.count;
         });
         
