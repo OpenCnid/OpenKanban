@@ -104,7 +104,7 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/workflows/runs/[id] - Delete a completed/cancelled/failed run
+// DELETE /api/workflows/runs/[id] — Dismiss (hide) a completed run from the active view
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -118,24 +118,15 @@ export async function DELETE(
     }
 
     if (existing.status === 'running' || existing.status === 'paused') {
-      return NextResponse.json({ error: 'Cannot delete a running or paused pipeline — cancel it first' }, { status: 400 });
+      return NextResponse.json({ error: 'Cannot dismiss a running or paused pipeline — cancel it first' }, { status: 400 });
     }
 
-    // Delete deliverables, dependencies, approvals, tasks, then the run
-    const taskIds = queryAll<{ id: string }>('SELECT id FROM tasks WHERE workflow_run_id = ?', [id]);
-    for (const task of taskIds) {
-      run('DELETE FROM task_deliverables WHERE task_id = ?', [task.id]);
-      run('DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?', [task.id, task.id]);
-    }
-    run('DELETE FROM approvals WHERE workflow_run_id = ?', [id]);
-    run('DELETE FROM tasks WHERE workflow_run_id = ?', [id]);
-    run('DELETE FROM workflow_runs WHERE id = ?', [id]);
-
-    broadcast({ type: 'workflow_run_deleted', payload: { id } });
+    run('UPDATE workflow_runs SET dismissed = 1 WHERE id = ?', [id]);
+    broadcast({ type: 'workflow_run_dismissed', payload: { id } });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Failed to delete workflow run:', error);
-    return NextResponse.json({ error: 'Failed to delete workflow run' }, { status: 500 });
+    console.error('Failed to dismiss workflow run:', error);
+    return NextResponse.json({ error: 'Failed to dismiss workflow run' }, { status: 500 });
   }
 }

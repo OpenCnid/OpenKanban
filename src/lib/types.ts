@@ -290,6 +290,7 @@ export interface WorkflowRun {
   duration_seconds?: number;
   started_at: string;
   completed_at?: string;
+  dismissed?: number;
   metadata?: string;
   // Joined fields
   template?: WorkflowTemplate;
@@ -427,7 +428,10 @@ export type SSEEventType =
   | 'approval_created'
   | 'approval_updated'
   | 'alert_created'
-  | 'notification_created';
+  | 'notification_created'
+  | 'workflow_run_dismissed'
+  | 'workflow_run_deleted'
+  | 'pipeline_output';
 
 export interface SSEEvent {
   type: SSEEventType;

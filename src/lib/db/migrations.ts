@@ -372,6 +372,19 @@ const migrations: Migration[] = [
 
       console.log('[Migration 009] workflow_counterexamples table created');
     }
+  },
+  {
+    id: '010',
+    name: 'add_workflow_runs_dismissed',
+    up: (db) => {
+      console.log('[Migration 010] Adding dismissed column to workflow_runs...');
+
+      const runsInfo = db.prepare("PRAGMA table_info(workflow_runs)").all() as { name: string }[];
+      if (!runsInfo.some(col => col.name === 'dismissed')) {
+        db.exec(`ALTER TABLE workflow_runs ADD COLUMN dismissed INTEGER DEFAULT 0`);
+        console.log('[Migration 010] Added dismissed to workflow_runs');
+      }
+    }
   }
 ];
 

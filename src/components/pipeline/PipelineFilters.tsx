@@ -1,6 +1,6 @@
 'use client';
 
-export type PipelineFilter = 'all' | 'running' | 'completed' | 'failed';
+export type PipelineFilter = 'all' | 'running' | 'completed' | 'failed' | 'history';
 
 interface PipelineFiltersProps {
   activeFilter: PipelineFilter;
@@ -9,10 +9,11 @@ interface PipelineFiltersProps {
 }
 
 const filters: { id: PipelineFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
+  { id: 'all', label: 'Active' },
   { id: 'running', label: 'Running' },
   { id: 'completed', label: 'Completed' },
   { id: 'failed', label: 'Failed' },
+  { id: 'history', label: 'History' },
 ];
 
 export function PipelineFilters({ activeFilter, onFilterChange, counts }: PipelineFiltersProps) {

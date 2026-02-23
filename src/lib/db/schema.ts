@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   duration_seconds INTEGER,
   started_at TEXT DEFAULT (datetime('now')),
   completed_at TEXT,
+  dismissed INTEGER DEFAULT 0,
   metadata TEXT
 );
 

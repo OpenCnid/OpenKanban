@@ -33,6 +33,7 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
   const [filter, setFilter] = useState<PipelineFilter>('all');
   const [showMissionPrompt, setShowMissionPrompt] = useState(false);
   const [completedRun, setCompletedRun] = useState<{ id: string; name: string } | null>(null);
+  const [historyRuns, setHistoryRuns] = useState<WorkflowRun[]>([]);
 
   const { workflowRuns, workflowTemplates, tasks, setWorkflowRuns } = useMissionControl();
 
@@ -65,9 +66,23 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
     return () => window.removeEventListener('sse-event', handler);
   }, [workspaceId, setWorkflowRuns]);
 
-  // Build PipelineRunData from real workflow runs + their tasks
+  // Fetch all runs (including dismissed) when history filter is active
+  useEffect(() => {
+    if (filter !== 'history') return;
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch(`/api/workflows/runs?workspace_id=${workspaceId}&include=all`);
+        if (res.ok) setHistoryRuns(await res.json());
+      } catch { /* silent */ }
+    };
+    fetchHistory();
+  }, [filter, workspaceId]);
+
+  // Build PipelineRunData from workflow runs
+  const sourceRuns = filter === 'history' ? historyRuns : workflowRuns;
+
   const pipelineRuns = useMemo((): PipelineRunData[] => {
-    return workflowRuns.map((run) => {
+    return sourceRuns.map((run) => {
       // Find tasks belonging to this run
       const runTasks = tasks
         .filter((t) => t.workflow_run_id === run.id)
@@ -138,22 +153,33 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         completedAt: run.completed_at,
       };
     });
-  }, [workflowRuns, tasks, workflowTemplates]);
+  }, [sourceRuns, tasks, workflowTemplates]);
 
   const filteredRuns = useMemo(() => {
     if (filter === 'all') return pipelineRuns;
+    if (filter === 'history') return pipelineRuns; // History shows all runs unfiltered
     return pipelineRuns.filter((r) => {
       if (filter === 'running') return r.status === 'running' || r.status === 'paused';
       return r.status === filter;
     });
   }, [pipelineRuns, filter]);
 
+  // Counts based on the active (non-dismissed) runs only
+  const activeRuns = useMemo((): PipelineRunData[] => {
+    // When we're in history mode, pipelineRuns has ALL runs — count active from store
+    const runs = filter === 'history'
+      ? pipelineRuns.filter(r => !workflowRuns.find(wr => wr.id === r.id)?.dismissed)
+      : pipelineRuns;
+    return runs;
+  }, [filter, pipelineRuns, workflowRuns]);
+
   const counts = useMemo(() => ({
-    all: pipelineRuns.length,
-    running: pipelineRuns.filter((r) => r.status === 'running' || r.status === 'paused').length,
-    completed: pipelineRuns.filter((r) => r.status === 'completed').length,
-    failed: pipelineRuns.filter((r) => r.status === 'failed' || r.status === 'cancelled').length,
-  }), [pipelineRuns]);
+    all: activeRuns.length,
+    running: activeRuns.filter((r) => r.status === 'running' || r.status === 'paused').length,
+    completed: activeRuns.filter((r) => r.status === 'completed').length,
+    failed: activeRuns.filter((r) => r.status === 'failed' || r.status === 'cancelled').length,
+    history: historyRuns.length,
+  }), [activeRuns, historyRuns]);
 
   const handleLaunchMission = useCallback(async (input: string, options?: { templateId?: string }) => {
     try {
@@ -291,17 +317,13 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
         console.error('Failed to dismiss run:', await res.text());
         return;
       }
-      // Remove from local state immediately
-      useMissionControl.getState().setWorkflowRuns(
-        useMissionControl.getState().workflowRuns.filter(r => r.id !== runId)
-      );
-      useMissionControl.getState().setTasks(
-        useMissionControl.getState().tasks.filter(t => t.workflow_run_id !== runId)
-      );
+      // Re-fetch active runs (dismissed ones are now hidden)
+      const runsRes = await fetch(`/api/workflows/runs?workspace_id=${workspaceId}`);
+      if (runsRes.ok) setWorkflowRuns(await runsRes.json());
     } catch (error) {
       console.error('Failed to dismiss run:', error);
     }
-  }, []);
+  }, [workspaceId, setWorkflowRuns]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -334,7 +356,7 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
             <div className="text-center text-mc-text-secondary">
               <GitBranch className="w-16 h-16 mx-auto mb-4 opacity-20" />
               <p className="text-lg font-medium mb-1">
-                {filter !== 'all' ? `No ${filter} pipelines.` : 'No active missions.'}
+                {filter === 'history' ? 'No pipeline history yet.' : filter !== 'all' ? `No ${filter} pipelines.` : 'No active missions.'}
               </p>
               <p className="text-sm">Click <span className="text-mc-accent">+ New Mission</span> to tell the agent what you need.</p>
             </div>

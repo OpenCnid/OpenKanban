@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
     const templateId = searchParams.get('template_id');
     const workspaceId = searchParams.get('workspace_id');
+    const includeAll = searchParams.get('include') === 'all';
 
     let sql = `
       SELECT wr.*, wt.name as template_name, wt.icon as template_icon
@@ -17,6 +18,11 @@ export async function GET(request: NextRequest) {
       WHERE 1=1
     `;
     const params: unknown[] = [];
+
+    // By default, hide dismissed runs. ?include=all shows everything (for history).
+    if (!includeAll) {
+      sql += ' AND (wr.dismissed IS NULL OR wr.dismissed = 0)';
+    }
 
     if (status) {
       const statuses = status.split(',').map(s => s.trim()).filter(Boolean);

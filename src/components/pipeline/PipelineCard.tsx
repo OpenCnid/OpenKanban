@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { XCircle, FileText, Trash2 } from 'lucide-react';
+import { XCircle, FileText, Check } from 'lucide-react';
 import { PipelineStepChain, type PipelineStep } from './PipelineStepChain';
 import { PipelineStepDetail, type StepDetailData } from './PipelineStepDetail';
 
@@ -108,10 +108,11 @@ export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun, on
           {(run.status === 'completed' || run.status === 'cancelled' || run.status === 'failed') && onDismissRun && (
             <button
               onClick={() => onDismissRun(run.id)}
-              className="p-1 hover:bg-red-500/10 rounded text-mc-text-secondary/30 hover:text-red-400 transition-colors"
-              title="Remove pipeline"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-mc-text-secondary/50 hover:bg-mc-bg-tertiary hover:text-mc-text-secondary transition-colors text-[10px]"
+              title="Dismiss from view"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Check className="w-3 h-3" />
+              Dismiss
             </button>
           )}
           <div className={`flex items-center gap-1.5 text-xs ${config.color}`}>
