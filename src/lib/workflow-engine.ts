@@ -659,6 +659,7 @@ async function watchStepCompletion(
 }
 
 async function extractSessionOutput(client: ReturnType<typeof getOpenClawClient>, sessionKey: string): Promise<string> {
+  // First try: sessions_history via Gateway API
   try {
     const history = await client.getSubagentHistory(sessionKey, { limit: 5, includeTools: true }) as Array<{
       role?: string;
@@ -681,8 +682,61 @@ async function extractSessionOutput(client: ReturnType<typeof getOpenClawClient>
       }
     }
   } catch {
-    // History unavailable
+    // History unavailable via API
   }
+
+  // Fallback: read JSONL directly for cross-agent sessions
+  // When agentId != "main", sessions_history can't see the session via the main agent context
+  // Parse the session key to find the JSONL file: agent:<agentId>:subagent:<uuid>
+  try {
+    const keyMatch = sessionKey.match(/^agent:([^:]+):subagent:(.+)$/);
+    if (keyMatch && keyMatch[1] !== 'main') {
+      const agentId = keyMatch[1];
+      const stateDir = process.env.OPENCLAW_STATE_DIR || `${process.env.HOME}/.openclaw`;
+      const sessionsDir = `${stateDir}/agents/${agentId}/sessions`;
+
+      // Read sessions.json to find the sessionId for this key
+      const fs = await import('fs/promises');
+      const sessionsJson = JSON.parse(await fs.readFile(`${sessionsDir}/sessions.json`, 'utf-8'));
+      const sessionEntry = sessionsJson[sessionKey];
+      if (!sessionEntry?.sessionId) {
+        console.log(`[WorkflowEngine] Cross-agent fallback: no session entry for ${sessionKey}`);
+        return '';
+      }
+
+      const jsonlPath = `${sessionsDir}/${sessionEntry.sessionId}.jsonl`;
+      const content = await fs.readFile(jsonlPath, 'utf-8');
+      const lines = content.trim().split('\n');
+
+      // Walk backwards through JSONL looking for last assistant text
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const entry = JSON.parse(lines[i]);
+          const msg = entry.message || entry;
+          if (msg.role !== 'assistant') continue;
+
+          if (typeof msg.content === 'string' && msg.content.length > 10) {
+            console.log(`[WorkflowEngine] Cross-agent fallback: extracted ${msg.content.length} chars from ${jsonlPath}`);
+            return msg.content.slice(0, 5000);
+          }
+          if (Array.isArray(msg.content)) {
+            const textBlocks = msg.content.filter((b: { type: string; text?: string }) => b.type === 'text' && b.text && b.text.length > 10);
+            if (textBlocks.length > 0) {
+              const output = textBlocks.map((b: { text: string }) => b.text).join('\n');
+              console.log(`[WorkflowEngine] Cross-agent fallback: extracted ${output.length} chars from ${jsonlPath}`);
+              return output.slice(0, 5000);
+            }
+          }
+        } catch {
+          // Skip malformed lines
+        }
+      }
+      console.log(`[WorkflowEngine] Cross-agent fallback: no assistant text found in ${jsonlPath}`);
+    }
+  } catch (err) {
+    console.warn(`[WorkflowEngine] Cross-agent JSONL fallback failed:`, err);
+  }
+
   return '';
 }
 
