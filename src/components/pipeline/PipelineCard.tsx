@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { XCircle } from 'lucide-react';
+import { XCircle, FileText } from 'lucide-react';
 import { PipelineStepChain, type PipelineStep } from './PipelineStepChain';
 import { PipelineStepDetail, type StepDetailData } from './PipelineStepDetail';
 
@@ -26,6 +26,7 @@ interface PipelineCardProps {
   onApproveStep?: (runId: string, taskId: string) => void;
   onRejectStep?: (runId: string, taskId: string) => void;
   onCancelRun?: (runId: string) => void;
+  onViewResults?: (runId: string, runName: string) => void;
 }
 
 const statusConfig: Record<PipelineRunStatus, { label: string; color: string; dot: string }> = {
@@ -37,7 +38,7 @@ const statusConfig: Record<PipelineRunStatus, { label: string; color: string; do
   cancelled: { label: 'Cancelled', color: 'text-mc-text-secondary/50', dot: 'bg-mc-text-secondary/50' },
 };
 
-export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun }: PipelineCardProps) {
+export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun, onViewResults }: PipelineCardProps) {
   const [selectedStep, setSelectedStep] = useState<number | null>(null);
   const config = statusConfig[run.status] || statusConfig.pending;
   const completedSteps = run.steps.filter((s) => s.state === 'complete').length;
@@ -140,21 +141,32 @@ export function PipelineCard({ run, onApproveStep, onRejectStep, onCancelRun }: 
         />
       )}
 
-      {/* Footer: timing */}
+      {/* Footer: timing + actions */}
       <div className="flex items-center justify-between text-[10px] text-mc-text-secondary/60">
         <span>
           Started {formatDistanceToNow(new Date(run.startedAt), { addSuffix: true })}
         </span>
-        {elapsed && (
-          <span className="font-mono text-mc-text-secondary/80">
-            ⏱ {elapsed}
-          </span>
-        )}
-        {run.completedAt && (
-          <span>
-            Completed {formatDistanceToNow(new Date(run.completedAt), { addSuffix: true })}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {elapsed && (
+            <span className="font-mono text-mc-text-secondary/80">
+              ⏱ {elapsed}
+            </span>
+          )}
+          {run.completedAt && (
+            <span>
+              Completed {formatDistanceToNow(new Date(run.completedAt), { addSuffix: true })}
+            </span>
+          )}
+          {run.status === 'completed' && onViewResults && (
+            <button
+              onClick={() => onViewResults(run.id, run.name)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded bg-mc-accent/10 text-mc-accent hover:bg-mc-accent/20 transition-colors text-[11px] font-medium"
+            >
+              <FileText className="w-3 h-3" />
+              View Results
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -626,14 +626,14 @@ async function watchStepCompletion(
 
       if (!agent) {
         // Session gone — try history extraction one last time
-        let output = await extractSessionOutput(client, sessionKey);
+        const output = await extractSessionOutput(client, sessionKey);
         await handleStepCompletion(taskId, output || 'Agent completed (session ended)');
         return;
       }
 
       if (agent.status === 'done' || agent.status === 'completed') {
         // Extract output from history while session still exists
-        let output = await extractSessionOutput(client, String(agent.sessionKey || sessionKey));
+        const output = await extractSessionOutput(client, String(agent.sessionKey || sessionKey));
         await handleStepCompletion(taskId, output || 'Agent completed successfully');
 
         // Clean up

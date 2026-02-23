@@ -33,7 +33,6 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
   const [filter, setFilter] = useState<PipelineFilter>('all');
   const [showMissionPrompt, setShowMissionPrompt] = useState(false);
   const [completedRun, setCompletedRun] = useState<{ id: string; name: string } | null>(null);
-  const [seenCompletedRuns] = useState(() => new Set<string>());
 
   const { workflowRuns, workflowTemplates, tasks, setWorkflowRuns } = useMissionControl();
 
@@ -65,16 +64,6 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
     window.addEventListener('sse-event', handler);
     return () => window.removeEventListener('sse-event', handler);
   }, [workspaceId, setWorkflowRuns]);
-
-  // Detect newly completed runs and show the completion modal
-  useEffect(() => {
-    for (const run of workflowRuns) {
-      if (run.status === 'completed' && !seenCompletedRuns.has(run.id)) {
-        seenCompletedRuns.add(run.id);
-        setCompletedRun({ id: run.id, name: run.name || 'Pipeline' });
-      }
-    }
-  }, [workflowRuns, seenCompletedRuns]);
 
   // Build PipelineRunData from real workflow runs + their tasks
   const pipelineRuns = useMemo((): PipelineRunData[] => {
@@ -339,6 +328,7 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
               onApproveStep={handleApproveStep}
               onRejectStep={handleRejectStep}
               onCancelRun={handleCancelRun}
+              onViewResults={(id, name) => setCompletedRun({ id, name })}
             />
           ))
         )}
