@@ -23,6 +23,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--format", default="webp", help="Output image format")
     parser.add_argument("--quality", type=int, default=85, help="Output quality")
     parser.add_argument("--max-width", type=int, default=1920, help="Maximum output width")
+    parser.add_argument("--max-per-video", type=int, default=25,
+                        help="Maximum frames to store per video (top by hook_quality)")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
@@ -98,6 +100,35 @@ def main() -> int:
     )
     if talking_heads:
         LOGGER.info("Skipped %d TALKING_HEAD frames (transcript-only value)", talking_heads)
+
+    # Cap frames per video to prevent long-video bias
+    max_per = args.max_per_video
+    if max_per and max_per > 0:
+        from collections import defaultdict
+        by_video: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for item in kept_annotations:
+            vid = str(item.get("videoId") or "unknown")
+            by_video[vid].append(item)
+
+        capped: list[dict[str, Any]] = []
+        for vid, frames in by_video.items():
+            if len(frames) <= max_per:
+                capped.extend(frames)
+            else:
+                # Sort by hook_quality desc, then timestamp for tie-breaking
+                sorted_frames = sorted(
+                    frames,
+                    key=lambda f: (-(f.get("hook_quality") or 0), f.get("timestamp") or 0),
+                )
+                capped.extend(sorted_frames[:max_per])
+                LOGGER.info("Capped %s from %d to %d frames (by hook_quality)", vid, len(frames), max_per)
+
+        # Re-sort by video + timestamp for chronological storage
+        capped.sort(key=lambda f: (str(f.get("videoId") or ""), f.get("timestamp") or 0))
+        trimmed = len(kept_annotations) - len(capped)
+        if trimmed:
+            LOGGER.info("Trimmed %d frames total across videos (max_per_video=%d)", trimmed, max_per)
+        kept_annotations = capped
     stored_index: list[dict[str, Any]] = []
     stored = 0
     failed = 0
@@ -153,6 +184,55 @@ def main() -> int:
 
     index_path = output_dir / "_index.json"
     save_json(index_path, stored_index)
+
+    # Write per-video summary for audit trail (explains zero-yield videos)
+    video_summary: dict[str, dict[str, Any]] = {}
+    for item in annotations:
+        if not isinstance(item, dict):
+            continue
+        vid = str(item.get("videoId") or "unknown")
+        if vid not in video_summary:
+            video_summary[vid] = {
+                "videoId": vid,
+                "videoTitle": item.get("videoTitle"),
+                "channelName": item.get("channelName"),
+                "channelSlug": item.get("channelSlug"),
+                "totalFrames": 0,
+                "keptFrames": 0,
+                "storedFrames": 0,
+                "categories": {},
+                "avgConfidence": 0.0,
+                "topHookQuality": 0,
+            }
+        summary = video_summary[vid]
+        summary["totalFrames"] += 1
+        cat = str(item.get("category") or "UNKNOWN")
+        summary["categories"][cat] = summary["categories"].get(cat, 0) + 1
+        if item.get("kept"):
+            summary["keptFrames"] += 1
+        hook = item.get("hook_quality")
+        if isinstance(hook, (int, float)) and hook > summary["topHookQuality"]:
+            summary["topHookQuality"] = int(hook)
+
+    # Count stored frames per video from stored_index
+    for entry in stored_index:
+        vid = str(entry.get("videoId") or "unknown")
+        if vid in video_summary:
+            video_summary[vid]["storedFrames"] += 1
+
+    # Compute average confidence per video
+    for vid, summary in video_summary.items():
+        vid_confs = [
+            item.get("confidence", 0)
+            for item in annotations
+            if isinstance(item, dict) and str(item.get("videoId") or "") == vid
+               and isinstance(item.get("confidence"), (int, float))
+        ]
+        if vid_confs:
+            summary["avgConfidence"] = round(sum(vid_confs) / len(vid_confs), 3)
+
+    summary_path = output_dir / "_summary.json"
+    save_json(summary_path, list(video_summary.values()))
 
     LOGGER.info("Compression complete (stored=%s failed=%s index=%s)", stored, failed, index_path)
     print(f"Stored {stored} frames (failed {failed})")

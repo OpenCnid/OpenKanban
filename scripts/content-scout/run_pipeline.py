@@ -49,6 +49,7 @@ STEP_ORDER = [
     "log",
     "notion",
     "brief",
+    "archive",
     "cleanup",
 ]
 
@@ -114,8 +115,8 @@ def script_path(script_name: str) -> str:
 
 def build_steps(pipeline_date: str, run_id: str | None = None) -> list[StepSpec]:
     daily_dir = f"content-vault/daily/{pipeline_date}"
-    # Use run_id for unique brief naming; fall back to _daily-brief for compat
-    brief_name = f"_brief-{run_id}.md" if run_id else "_daily-brief.md"
+    # Human-readable brief name: _brief-2026-02-24-14h30.md
+    brief_name = f"_brief-{pipeline_date}-{run_id}.md" if run_id else f"_brief-{pipeline_date}.md"
 
     return [
         StepSpec(
@@ -269,6 +270,22 @@ def build_steps(pipeline_date: str, run_id: str | None = None) -> list[StepSpec]
             optional=True,
         ),
         StepSpec(
+            name="archive",
+            script="archive_transcripts.py",
+            args=[
+                "--transcripts-dir",
+                "tmp/transcripts",
+                "--output-dir",
+                f"content-vault/transcripts/{pipeline_date}",
+                "--annotations",
+                "tmp/annotations.json",
+                "--errors-dir",
+                "content-vault/errors",
+                "--date",
+                pipeline_date,
+            ],
+        ),
+        StepSpec(
             name="cleanup",
             script="cleanup_tmp.py",
             args=["--tmp-dir", "tmp"],
@@ -354,8 +371,8 @@ def main() -> int:
     setup_logging(args.verbose)
 
     pipeline_date = normalize_date(args.date)
-    # Generate a run_id from timestamp for unique brief naming (multiple runs/day)
-    run_id = datetime.utcnow().strftime("%H%M%S")
+    # Generate a human-readable run_id for unique brief naming (multiple runs/day)
+    run_id = utcnow().strftime("%Hh%M")
     steps = build_steps(pipeline_date, run_id=run_id)
 
     state_path = resolve_path("tmp/_pipeline_state.json")

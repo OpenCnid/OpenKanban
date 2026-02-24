@@ -12,6 +12,18 @@ from _common import ensure_dir, load_json, resolve_path, save_json, setup_loggin
 
 LOGGER = logging.getLogger("content_scout.build_tag_index")
 
+# Categories are classification labels, not content tags — exclude from tag index
+CATEGORY_NAMES = {"CHART_VISUAL", "TALKING_HEAD", "GRAPHIC", "SCREEN", "TABLE", "SLIDE", "FILLER", "CHART"}
+
+# Known ticker symbols — kept uppercase to distinguish from words
+KNOWN_TICKERS = {
+    "SPY", "SPX", "QQQ", "NVDA", "AAPL", "TSLA", "AMD", "META", "AMZN", "MSFT",
+    "GOOG", "GOOGL", "NFLX", "HD", "WMT", "GLD", "TLT", "VIX", "OVX", "DXY",
+    "BTC", "ETH", "PLTR", "ORCL", "OXY", "IGV", "FVRR", "IWM", "/CL", "/ES",
+    "/NQ", "/GC", "/SI", "XLF", "XLE", "XLK", "XLV", "COIN", "MSTR", "SMCI",
+    "ARM", "AVGO", "MU", "INTC", "COST", "CRM", "UBER", "BA", "JPM", "GS",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -26,8 +38,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_tag(value: Any) -> str:
+    """Normalize a tag: tickers stay uppercase, everything else lowercased."""
     tag = str(value or "").strip()
-    return tag
+    if not tag:
+        return ""
+    # Skip category names entirely
+    if tag.upper() in CATEGORY_NAMES:
+        return ""
+    # Keep known tickers uppercase
+    if tag.upper() in KNOWN_TICKERS:
+        return tag.upper()
+    # Lowercase everything else for dedup
+    return tag.lower()
 
 
 def collect_tags(item: dict[str, Any]) -> set[str]:
@@ -44,9 +66,7 @@ def collect_tags(item: dict[str, Any]) -> set[str]:
     if ticker:
         tags.add(ticker)
 
-    category = normalize_tag(item.get("category"))
-    if category:
-        tags.add(category)
+    # Deliberately NOT adding category — it's a classification label, not a content tag
 
     return tags
 

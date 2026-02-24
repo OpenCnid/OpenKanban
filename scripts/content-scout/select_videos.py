@@ -67,6 +67,8 @@ def parse_args() -> argparse.Namespace:
         help="How many recent uploads to inspect per channel",
     )
     parser.add_argument("--output", default="tmp/video_list.json", help="Output JSON path")
+    parser.add_argument("--channels-dir", default="content-vault/channels",
+                        help="Directory to write per-channel scan metadata")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logs")
     return parser.parse_args()
 
@@ -146,6 +148,54 @@ def score_video(
     )
 
 
+def update_channel_metadata(channels: list[dict[str, Any]], scan_results: dict[str, dict[str, Any]],
+                            channels_dir_path: str) -> None:
+    """Write per-channel scan metadata to content-vault/channels/."""
+    channels_dir = resolve_path(channels_dir_path)
+    from _common import ensure_dir, save_json
+    ensure_dir(channels_dir)
+
+    for channel in channels:
+        channel_name = str(channel.get("name") or "Unknown")
+        channel_slug = str(channel.get("slug") or normalize_slug(channel_name))
+        scan_data = scan_results.get(channel_slug, {})
+
+        meta_path = channels_dir / f"{channel_slug}.json"
+
+        # Merge with existing metadata
+        existing = load_json(meta_path, default={})
+        if not isinstance(existing, dict):
+            existing = {}
+
+        existing.update({
+            "name": channel_name,
+            "slug": channel_slug,
+            "url": channel.get("url"),
+            "handle": channel.get("handle"),
+            "category": channel.get("category"),
+            "priority": channel.get("priority"),
+            "source": channel.get("source"),
+            "lastScanned": utcnow().isoformat(),
+            "lastScanVideosFound": scan_data.get("total_found", 0),
+            "lastScanVideosSelected": scan_data.get("selected", 0),
+            "lastScanError": scan_data.get("error"),
+        })
+
+        # Track scan history (keep last 30 entries)
+        history = existing.get("scanHistory", [])
+        if not isinstance(history, list):
+            history = []
+        history.append({
+            "date": utcnow().isoformat(),
+            "found": scan_data.get("total_found", 0),
+            "selected": scan_data.get("selected", 0),
+            "error": scan_data.get("error"),
+        })
+        existing["scanHistory"] = history[-30:]
+
+        save_json(meta_path, existing)
+
+
 def main() -> int:
     args = parse_args()
     setup_logging(args.verbose)
@@ -185,6 +235,7 @@ def main() -> int:
 
     selected: list[dict[str, Any]] = []
     scanned = 0
+    channel_scan_results: dict[str, dict[str, Any]] = {}
 
     for channel in channels:
         channel_id = str(channel.get("id") or "")
@@ -201,7 +252,12 @@ def main() -> int:
             entries = fetch_channel_entries(channel_url, args.playlist_end)
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception("Failed to fetch channel %s: %s", channel_name, exc)
+            channel_scan_results[channel_slug] = {
+                "total_found": 0, "selected": 0, "error": str(exc),
+            }
             continue
+
+        channel_selected_count = 0
 
         for position, entry in enumerate(entries):
             scanned += 1
@@ -258,11 +314,25 @@ def main() -> int:
                     "score": round(score, 6),
                 }
             )
+            channel_selected_count += 1
+
+        channel_scan_results[channel_slug] = {
+            "total_found": len(entries),
+            "selected": channel_selected_count,
+            "error": None,
+        }
 
     selected.sort(key=lambda item: item["score"], reverse=True)
     output = selected[: max(args.limit, 0)]
 
     save_json(output_path, output)
+
+    # Update per-channel metadata in content-vault/channels/
+    try:
+        update_channel_metadata(channels, channel_scan_results, args.channels_dir)
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("Failed to update channel metadata: %s", exc)
+
     LOGGER.info(
         "Selected %s videos (scanned=%s channels=%s output=%s)",
         len(output),

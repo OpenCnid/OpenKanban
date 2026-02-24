@@ -220,8 +220,23 @@ def main() -> int:
 
     annotations = load_json(annotations_path, default=[])
     watchlist = load_json(watchlist_path, default={})
+
+    # Try primary transcripts dir (tmp/transcripts), fall back to archived copy
     transcripts_dir = resolve_path(args.transcripts_dir)
     transcripts = load_transcripts(transcripts_dir)
+    if not transcripts:
+        # Infer date from output path or annotations for fallback
+        archive_date = None
+        out_parts = str(args.output).split("/")
+        for part in out_parts:
+            if len(part) == 10 and part.count("-") == 2:
+                archive_date = part
+                break
+        if archive_date:
+            fallback_dir = resolve_path(f"content-vault/transcripts/{archive_date}")
+            if fallback_dir.exists():
+                transcripts = load_transcripts(fallback_dir)
+                LOGGER.info("Using archived transcripts from %s (%d loaded)", fallback_dir, len(transcripts))
     LOGGER.info("Loaded %d full transcripts from %s", len(transcripts), transcripts_dir)
 
     if not isinstance(annotations, list):
