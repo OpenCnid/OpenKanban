@@ -77,8 +77,8 @@ def parse_args() -> argparse.Namespace:
                         help="Directory containing full transcript JSON files")
     parser.add_argument("--watchlist", default="config/content-scout/watchlist.json",
                         help="Watchlist JSON path")
-    parser.add_argument("--output", default="content-vault/daily/_daily-brief.md",
-                        help="Output markdown path")
+    parser.add_argument("--output", default=None,
+                        help="Output markdown path (default: content-vault/daily/YYYY-MM-DD/_brief-YYYY-MM-DD.md)")
     parser.add_argument("--provider", choices=["anthropic", "openai", "auto"], default="auto",
                         help="LLM provider (default: auto-detect from available API keys)")
     parser.add_argument("--model", default=None, help="Model name (default: provider-specific)")
@@ -216,6 +216,13 @@ def main() -> int:
 
     annotations_path = resolve_path(args.annotations)
     watchlist_path = resolve_path(args.watchlist)
+
+    # Auto-generate dated output path if none specified
+    if args.output is None:
+        from datetime import date
+        today = date.today().isoformat()
+        args.output = f"content-vault/daily/{today}/_brief-{today}.md"
+
     output_path = resolve_path(args.output)
 
     annotations = load_json(annotations_path, default=[])

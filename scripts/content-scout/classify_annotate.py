@@ -371,7 +371,28 @@ def main() -> int:
     kept = 0
     discarded = 0
 
-    for batch_idx, batch in enumerate(chunked(frames, max(1, args.batch_size))):
+    # Load existing checkpoint if present (resume-safe)
+    checkpoint_path = output_path.with_suffix(".checkpoint.json")
+    processed_frame_paths: set[str] = set()
+    if checkpoint_path.exists():
+        try:
+            existing = load_json(checkpoint_path, default=[])
+            if isinstance(existing, list):
+                annotations = existing
+                for a in annotations:
+                    fp = str(a.get("framePath") or "")
+                    if fp:
+                        processed_frame_paths.add(fp)
+                kept = sum(1 for a in annotations if a.get("kept"))
+                discarded = len(annotations) - kept
+                LOGGER.info("Resuming from checkpoint: %d frames already processed", len(annotations))
+        except Exception:
+            pass
+
+    # Filter out already-processed frames
+    remaining_frames = [f for f in frames if str(f.get("framePath") or "") not in processed_frame_paths]
+
+    for batch_idx, batch in enumerate(chunked(remaining_frames, max(1, args.batch_size))):
         title = str(batch[0].get("videoTitle") or "Unknown Video")
         channel = str(batch[0].get("channelName") or "Unknown Channel")
         prompt = PROMPT_TEMPLATE.format(title=title, channel=channel)
@@ -394,7 +415,13 @@ def main() -> int:
             else:
                 discarded += 1
 
+        # Checkpoint after every batch so progress is never lost
+        save_json(checkpoint_path, annotations)
+
     save_json(output_path, annotations)
+    # Clean up checkpoint on successful completion
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
     LOGGER.info("Classification complete (total=%s kept=%s discarded=%s provider=%s)",
                 len(annotations), kept, discarded, provider)
     print(f"Classified {len(annotations)} frames (kept {kept}, discarded {discarded}) via {provider}/{model}")
