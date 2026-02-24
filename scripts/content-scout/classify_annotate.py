@@ -16,34 +16,45 @@ from _common import ROOT_DIR, load_json, resolve_path, save_json, setup_logging
 
 LOGGER = logging.getLogger("content_scout.classify_annotate")
 
-PROMPT_TEMPLATE = """You are a stock/options trading analyst reviewing frames from a competitor's YouTube video.
-Video: {title} by {channel}
-For EACH frame, provide classification and (if relevant) annotation.
+PROMPT_TEMPLATE = """You are a YouTube content strategist analyzing a competitor's video for an options trader who runs his own channel.
+Video: "{title}" by {channel}
 
-Categories: CHART, GRAPH, TABLE, SLIDE, SCREEN, TALKING_HEAD, FILLER
-If TALKING_HEAD or FILLER, return classification only.
-If CHART/GRAPH/TABLE/SLIDE/SCREEN with confidence >= 0.7, annotate:
-- what: description
-- key_data: array of data points
-- verbal_context: what presenter says
-- insight: analytical insight
-- relevance: 1-5
-- tags: array
-- content_angle: content opportunity
+Your goal: Extract CONTENT INTELLIGENCE — what makes this video work (or not) as content? How is the creator structuring their argument? What can our client learn or respond to?
+
+For EACH frame, classify and annotate.
+
+Categories: CHART_VISUAL, TALKING_HEAD, GRAPHIC, SCREEN, TABLE, SLIDE, FILLER
+- TALKING_HEAD: presenter on camera. Note energy, style, whether they're explaining or reacting.
+- CHART_VISUAL: a chart being used to support a point. Focus on HOW they present it, not the price data.
+- GRAPHIC: custom overlays, titles, lower-thirds, comparisons.
+- SCREEN: screen recording of a trading platform or website.
+- TABLE/SLIDE: data tables, presentation slides.
+- FILLER: intros, outros, sponsor reads, dead air.
+
+If FILLER, return category + confidence only.
+
+For all other categories, extract:
+- what: describe what's shown and how it's being used in the video's narrative
+- verbal_context: quote the most important sentence from transcriptWindow — what point is the presenter making HERE?
+- content_format: what type of content moment is this? (education, prediction, trade-recap, reaction, tutorial, storytelling, call-to-action, opinion)
+- visual_technique: how are they presenting this visually? (clean chart, annotated chart, side-by-side comparison, picture-in-picture, full-screen graphic, talking-head-with-overlay, etc.)
+- topic: the subject being discussed (e.g. "NVDA earnings positioning", "SPY crash scenario", "iron condor strategy")
+- insight: what's the interesting or novel point being made? What might our client learn from this?
+- hook_quality: 1-5 (5 = compelling moment that keeps viewers watching, 1 = boring/repetitive)
+- content_idea: a specific video idea our client could make in response to or inspired by this moment
+- tags: array of topic tags (ticker names, strategy names, concepts)
 - ticker: string or null
-- timeframe: string or null
-- indicators: array
 
-Respond as JSON array.
+Respond as JSON array only. One object per input frame.
 """
 
-ALLOWED_CATEGORIES = {"CHART", "GRAPH", "TABLE", "SLIDE", "SCREEN"}
+ALLOWED_CATEGORIES = {"CHART_VISUAL", "TALKING_HEAD", "GRAPHIC", "SCREEN", "TABLE", "SLIDE"}
 JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
 # Default models per provider
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-20250514",
-    "openai": "gpt-4o",
+    "openai": "gpt-5.2",
 }
 
 
@@ -158,11 +169,11 @@ def normalize_annotation(frame: dict[str, Any], model_payload: dict[str, Any], t
     except (TypeError, ValueError):
         confidence = 0.0
 
-    relevance_value = model_payload.get("relevance")
+    hook_quality_value = model_payload.get("hook_quality")
     try:
-        relevance = int(relevance_value) if relevance_value is not None else None
+        hook_quality = int(hook_quality_value) if hook_quality_value is not None else None
     except (TypeError, ValueError):
-        relevance = None
+        hook_quality = None
 
     kept = category in ALLOWED_CATEGORIES and confidence >= threshold
 
@@ -179,15 +190,15 @@ def normalize_annotation(frame: dict[str, Any], model_payload: dict[str, Any], t
         "confidence": confidence,
         "kept": kept,
         "description": model_payload.get("what") or model_payload.get("description"),
-        "key_data": normalize_tags(model_payload.get("key_data")),
         "verbal_context": model_payload.get("verbal_context"),
+        "content_format": model_payload.get("content_format"),
+        "visual_technique": model_payload.get("visual_technique"),
+        "topic": model_payload.get("topic"),
         "insight": model_payload.get("insight"),
-        "relevance": relevance,
+        "hook_quality": hook_quality,
+        "content_idea": model_payload.get("content_idea"),
         "tags": normalize_tags(model_payload.get("tags")),
-        "content_angle": model_payload.get("content_angle"),
         "ticker": model_payload.get("ticker"),
-        "timeframe": model_payload.get("timeframe"),
-        "indicators": normalize_tags(model_payload.get("indicators")),
         "raw": model_payload,
     }
 
@@ -209,8 +220,8 @@ def build_frame_text(batch: list[dict[str, Any]]) -> str:
 
 RESPONSE_INSTRUCTION = (
     "Return a JSON array only. One object per input frame. "
-    "Each object MUST include: framePath, category, confidence, what, key_data, verbal_context, "
-    "insight, relevance, tags, content_angle, ticker, timeframe, indicators."
+    "Each object MUST include: framePath, category, confidence, what, verbal_context, "
+    "content_format, visual_technique, topic, insight, hook_quality, content_idea, tags, ticker."
 )
 
 
@@ -304,9 +315,11 @@ def call_openai(batch: list[dict[str, Any]], model: str, prompt: str) -> str:
 
     content.append({"type": "text", "text": RESPONSE_INSTRUCTION})
 
+    # gpt-5+ requires max_completion_tokens instead of max_tokens
+    token_kwarg = "max_completion_tokens" if "gpt-5" in model or "o3" in model or "o4" in model else "max_tokens"
     response = client.chat.completions.create(
         model=model,
-        max_tokens=4096,
+        **{token_kwarg: 4096},
         temperature=0,
         messages=[{"role": "user", "content": content}],
     )

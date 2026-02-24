@@ -17,23 +17,56 @@ LOGGER = logging.getLogger("content_scout.generate_brief")
 # Default models per provider
 DEFAULT_MODELS = {
     "anthropic": "claude-opus-4-20250514",
-    "openai": "gpt-4o",
+    "openai": "gpt-5.2",
 }
 
-BRIEF_INSTRUCTIONS = """
-You are producing a position-aware daily competitor content brief for Hans.
+BRIEF_INSTRUCTIONS = """You are a YouTube content strategist writing a daily brief for Hans, an options trader who runs his own YouTube channel. Hans already has his own market intelligence — he does NOT need trading signals or price levels. He needs CONTENT IDEAS.
 
-Use the provided annotations and watchlist. Output markdown with exactly these sections:
-1. Position Alerts — competitor analysis on Hans's positions
-2. Top Themes — consensus views + contrarian angles
-3. Best Visuals — relevance 4-5 with timestamp links
-4. Content Opportunities — gaps + edge
-5. Ticker Heatmap — all tickers + sentiment + key levels
+## Your job:
+Analyze the frame annotations (with transcripts) from competitor YouTube videos. Tell Hans what content is being made, what's working, what's missing, and what HE should make next.
 
-Requirements:
-- Be concise and actionable.
-- Include timestamp URLs when available.
-- If data is missing, state assumptions explicitly.
+## Output format (markdown):
+
+### 🎯 Video Ideas for Hans
+The most important section. Based on everything analyzed today, give Hans 3-5 SPECIFIC video ideas he could film. For each:
+- **Title** (written as an actual YouTube title — clickable, specific)
+- **Hook** — the opening 15 seconds, how to grab attention
+- **Angle** — what makes Hans's take different from what competitors already covered?
+- **Why now** — why is this timely?
+- **Inspired by** — [timestamp link] to the competitor moment that sparked this idea
+
+### 📺 Competitor Breakdown
+For each video analyzed today:
+- **Video:** title + channel + [link]
+- **Thesis:** What's the ONE argument this video is making? (1-2 sentences)
+- **Format:** How is it structured? (prediction, recap, tutorial, reaction, etc.)
+- **What works:** What's good about this video? What could Hans learn from it?
+- **What's missing:** What did they leave out that Hans could cover?
+- **Best moment:** [timestamp link] to the most interesting/useful part
+- **Visual approach:** How did they use charts/graphics to support their points?
+
+### 🔥 Trending Topics
+What subjects are competitors all covering right now? Group by theme:
+- Which topics are oversaturated (everyone's saying the same thing)?
+- Which topics have room for a fresh take?
+- Any emerging topics only 1 creator covered that could blow up?
+
+### 💡 Content Techniques Worth Stealing
+Specific presentation techniques, hooks, formats, or visual approaches that worked well:
+- What it is, who did it, [timestamp link]
+- How Hans could adapt it for his style
+
+### 📊 Quick Stats
+| Video | Channel | Topic | Format | Best Moment |
+Summary table of everything analyzed.
+
+## Rules:
+- This is about CONTENT STRATEGY, not trading strategy.
+- Every video idea must be specific enough that Hans could film it tomorrow.
+- Quote what competitors said (verbal_context) to show what angles they took.
+- Timestamp links for everything — Hans should be able to click and see the moment.
+- If only one video was analyzed, be honest about limited data.
+- Think like a YouTube strategist, not a trading analyst.
 """
 
 
@@ -100,9 +133,11 @@ def call_anthropic(prompt: str, model: str) -> str:
 def call_openai(prompt: str, model: str) -> str:
     from openai import OpenAI
     client = OpenAI()
+    # gpt-5+ requires max_completion_tokens instead of max_tokens
+    token_kwarg = "max_completion_tokens" if "gpt-5" in model or "o3" in model or "o4" in model else "max_tokens"
     response = client.chat.completions.create(
         model=model,
-        max_tokens=4096,
+        **{token_kwarg: 4096},
         temperature=0.2,
         messages=[{"role": "user", "content": prompt}],
     )
