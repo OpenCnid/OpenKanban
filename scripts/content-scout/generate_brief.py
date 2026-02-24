@@ -185,15 +185,29 @@ def call_anthropic(prompt: str, model: str) -> str:
 def call_openai(prompt: str, model: str) -> str:
     from openai import OpenAI
     client = OpenAI()
-    # gpt-5+ requires max_completion_tokens instead of max_tokens
-    token_kwarg = "max_completion_tokens" if "gpt-5" in model or "o3" in model or "o4" in model else "max_tokens"
+    is_reasoning = any(tag in model for tag in ("gpt-5", "o3", "o4"))
+    # Reasoning models need much more headroom — internal reasoning tokens
+    # count against max_completion_tokens. 16384 gives ~12K for reasoning
+    # + ~4K for visible output.
+    token_kwarg = "max_completion_tokens" if is_reasoning else "max_tokens"
+    token_limit = 16384 if is_reasoning else 4096
+    # Reasoning models ignore temperature (always 1), so only set for non-reasoning
+    extra_kwargs = {} if is_reasoning else {"temperature": 0.2}
     response = client.chat.completions.create(
         model=model,
-        **{token_kwarg: 4096},
-        temperature=0.2,
+        **{token_kwarg: token_limit},
+        **extra_kwargs,
         messages=[{"role": "user", "content": prompt}],
     )
-    return (response.choices[0].message.content or "").strip()
+    content = (response.choices[0].message.content or "").strip()
+    # Log usage for debugging token budget issues
+    usage = getattr(response, "usage", None)
+    if usage:
+        LOGGER.info("Token usage: prompt=%s completion=%s total=%s",
+                     getattr(usage, "prompt_tokens", "?"),
+                     getattr(usage, "completion_tokens", "?"),
+                     getattr(usage, "total_tokens", "?"))
+    return content
 
 
 def main() -> int:
