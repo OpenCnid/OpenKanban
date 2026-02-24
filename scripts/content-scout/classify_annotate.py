@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Classify and annotate frames using Anthropic vision models."""
+"""Classify and annotate frames using vision models (Anthropic or OpenAI)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ import os
 import re
 from pathlib import Path
 from typing import Any
-
-from anthropic import Anthropic
 
 from _common import ROOT_DIR, load_json, resolve_path, save_json, setup_logging
 
@@ -42,25 +40,43 @@ Respond as JSON array.
 ALLOWED_CATEGORIES = {"CHART", "GRAPH", "TABLE", "SLIDE", "SCREEN"}
 JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
+# Default models per provider
+DEFAULT_MODELS = {
+    "anthropic": "claude-sonnet-4-20250514",
+    "openai": "gpt-4o",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", default="tmp/windowed_frames.json", help="Windowed frames JSON path")
     parser.add_argument("--batch-size", type=int, default=5, help="Number of frames per API call")
-    parser.add_argument(
-        "--model",
-        default="claude-sonnet-4-20250514",
-        help="Anthropic model name",
-    )
-    parser.add_argument(
-        "--confidence-threshold",
-        type=float,
-        default=0.7,
-        help="Minimum confidence required for kept annotations",
-    )
+    parser.add_argument("--provider", choices=["anthropic", "openai", "auto"], default="auto",
+                        help="LLM provider (default: auto-detect from available API keys)")
+    parser.add_argument("--model", default=None, help="Model name (default: provider-specific)")
+    parser.add_argument("--confidence-threshold", type=float, default=0.7,
+                        help="Minimum confidence required for kept annotations")
     parser.add_argument("--output", default="tmp/annotations.json", help="Output annotations JSON path")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logs")
     return parser.parse_args()
+
+
+def detect_provider(requested: str) -> str:
+    """Detect which provider to use based on available API keys."""
+    if requested != "auto":
+        return requested
+
+    has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    has_openai = bool(os.environ.get("OPENAI_API_KEY"))
+
+    if has_anthropic:
+        return "anthropic"
+    if has_openai:
+        return "openai"
+
+    raise RuntimeError(
+        "No API key found. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in the environment."
+    )
 
 
 def chunked(items: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
@@ -76,7 +92,7 @@ def resolve_frame_path(frame_path: str) -> Path:
 
 def image_media_type(path: Path) -> str:
     suffix = path.suffix.lower()
-    if suffix == ".jpg" or suffix == ".jpeg":
+    if suffix in (".jpg", ".jpeg"):
         return "image/jpeg"
     if suffix == ".webp":
         return "image/webp"
@@ -85,18 +101,6 @@ def image_media_type(path: Path) -> str:
 
 def encode_image(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("ascii")
-
-
-def extract_text_blocks(response: Any) -> str:
-    content = getattr(response, "content", None)
-    if not content:
-        return ""
-    parts: list[str] = []
-    for block in content:
-        text = getattr(block, "text", None)
-        if text:
-            parts.append(text)
-    return "\n".join(parts).strip()
 
 
 def parse_json_array(raw_text: str) -> list[dict[str, Any]]:
@@ -188,61 +192,129 @@ def normalize_annotation(frame: dict[str, Any], model_payload: dict[str, Any], t
     }
 
 
-def build_batch_request(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    content: list[dict[str, Any]] = []
+def build_frame_text(batch: list[dict[str, Any]]) -> str:
+    """Build the per-frame text descriptions (shared between providers)."""
+    parts: list[str] = []
+    for idx, frame in enumerate(batch, start=1):
+        parts.append(
+            f"Frame {idx}:\n"
+            f"framePath: {frame.get('framePath', '')}\n"
+            f"videoId: {frame.get('videoId', '')}\n"
+            f"timestamp: {frame.get('timestamp', '')}\n"
+            f"sourceUrl: {frame.get('sourceUrl', '')}\n"
+            f"transcriptWindow: {frame.get('transcriptWindow', '')}\n"
+        )
+    return "\n".join(parts)
+
+
+RESPONSE_INSTRUCTION = (
+    "Return a JSON array only. One object per input frame. "
+    "Each object MUST include: framePath, category, confidence, what, key_data, verbal_context, "
+    "insight, relevance, tags, content_angle, ticker, timeframe, indicators."
+)
+
+
+# ─── Anthropic provider ───────────────────────────────────────────────────
+
+def call_anthropic(batch: list[dict[str, Any]], model: str, prompt: str) -> str:
+    """Send a batch to Anthropic's vision API and return raw text response."""
+    from anthropic import Anthropic
+
+    client = Anthropic()
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
 
     for idx, frame in enumerate(batch, start=1):
         frame_path = str(frame.get("framePath") or "")
         transcript = str(frame.get("transcriptWindow") or "")
-        content.append(
-            {
-                "type": "text",
-                "text": (
-                    "Frame {index}:\n"
-                    "framePath: {frame_path}\n"
-                    "videoId: {video_id}\n"
-                    "timestamp: {timestamp}\n"
-                    "sourceUrl: {source_url}\n"
-                    "transcriptWindow: {transcript}\n"
-                ).format(
-                    index=idx,
-                    frame_path=frame_path,
-                    video_id=frame.get("videoId", ""),
-                    timestamp=frame.get("timestamp", ""),
-                    source_url=frame.get("sourceUrl", ""),
-                    transcript=transcript,
-                ),
-            }
-        )
+        content.append({
+            "type": "text",
+            "text": (
+                f"Frame {idx}:\n"
+                f"framePath: {frame_path}\n"
+                f"videoId: {frame.get('videoId', '')}\n"
+                f"timestamp: {frame.get('timestamp', '')}\n"
+                f"sourceUrl: {frame.get('sourceUrl', '')}\n"
+                f"transcriptWindow: {transcript}\n"
+            ),
+        })
 
         resolved = resolve_frame_path(frame_path)
-        if not resolved.exists():
-            LOGGER.warning("Frame image missing: %s", resolved)
-            continue
-
-        content.append(
-            {
+        if resolved.exists():
+            content.append({
                 "type": "image",
                 "source": {
                     "type": "base64",
                     "media_type": image_media_type(resolved),
                     "data": encode_image(resolved),
                 },
-            }
-        )
+            })
 
-    content.append(
-        {
+    content.append({"type": "text", "text": RESPONSE_INSTRUCTION})
+
+    response = client.messages.create(
+        model=model,
+        max_tokens=4096,
+        temperature=0,
+        messages=[{"role": "user", "content": content}],
+    )
+
+    parts: list[str] = []
+    for block in getattr(response, "content", []) or []:
+        text = getattr(block, "text", None)
+        if text:
+            parts.append(text)
+    return "\n".join(parts).strip()
+
+
+# ─── OpenAI provider ──────────────────────────────────────────────────────
+
+def call_openai(batch: list[dict[str, Any]], model: str, prompt: str) -> str:
+    """Send a batch to OpenAI's vision API and return raw text response."""
+    from openai import OpenAI
+
+    client = OpenAI()
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+
+    for idx, frame in enumerate(batch, start=1):
+        frame_path = str(frame.get("framePath") or "")
+        transcript = str(frame.get("transcriptWindow") or "")
+        content.append({
             "type": "text",
             "text": (
-                "Return a JSON array only. One object per input frame. "
-                "Each object MUST include: framePath, category, confidence, what, key_data, verbal_context, "
-                "insight, relevance, tags, content_angle, ticker, timeframe, indicators."
+                f"Frame {idx}:\n"
+                f"framePath: {frame_path}\n"
+                f"videoId: {frame.get('videoId', '')}\n"
+                f"timestamp: {frame.get('timestamp', '')}\n"
+                f"sourceUrl: {frame.get('sourceUrl', '')}\n"
+                f"transcriptWindow: {transcript}\n"
             ),
-        }
-    )
-    return content
+        })
 
+        resolved = resolve_frame_path(frame_path)
+        if resolved.exists():
+            media = image_media_type(resolved)
+            b64 = encode_image(resolved)
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{media};base64,{b64}",
+                    "detail": "high",
+                },
+            })
+
+    content.append({"type": "text", "text": RESPONSE_INSTRUCTION})
+
+    response = client.chat.completions.create(
+        model=model,
+        max_tokens=4096,
+        temperature=0,
+        messages=[{"role": "user", "content": content}],
+    )
+
+    return (response.choices[0].message.content or "").strip()
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────
 
 def find_payload_for_frame(frame: dict[str, Any], payloads: list[dict[str, Any]], index: int) -> dict[str, Any]:
     frame_path = str(frame.get("framePath") or "")
@@ -276,32 +348,28 @@ def main() -> int:
     if not isinstance(frames, list):
         raise ValueError(f"Expected list input: {input_path}")
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise RuntimeError("ANTHROPIC_API_KEY is required for classification")
+    provider = detect_provider(args.provider)
+    model = args.model or DEFAULT_MODELS[provider]
+    LOGGER.info("Using provider=%s model=%s", provider, model)
 
-    client = Anthropic()
+    call_fn = call_anthropic if provider == "anthropic" else call_openai
 
     annotations: list[dict[str, Any]] = []
     kept = 0
     discarded = 0
 
-    for batch in chunked(frames, max(1, args.batch_size)):
+    for batch_idx, batch in enumerate(chunked(frames, max(1, args.batch_size))):
         title = str(batch[0].get("videoTitle") or "Unknown Video")
         channel = str(batch[0].get("channelName") or "Unknown Channel")
         prompt = PROMPT_TEMPLATE.format(title=title, channel=channel)
-        content = [{"type": "text", "text": prompt}, *build_batch_request(batch)]
+
+        LOGGER.info("Processing batch %d (%d frames) via %s/%s", batch_idx + 1, len(batch), provider, model)
 
         try:
-            response = client.messages.create(
-                model=args.model,
-                max_tokens=4096,
-                temperature=0,
-                messages=[{"role": "user", "content": content}],
-            )
-            payload_text = extract_text_blocks(response)
-            parsed = parse_json_array(payload_text)
+            raw_text = call_fn(batch, model, prompt)
+            parsed = parse_json_array(raw_text)
         except Exception as exc:  # noqa: BLE001
-            LOGGER.exception("Anthropic batch call failed: %s", exc)
+            LOGGER.exception("Batch %d call failed: %s", batch_idx + 1, exc)
             parsed = []
 
         for index, frame in enumerate(batch, start=1):
@@ -314,13 +382,9 @@ def main() -> int:
                 discarded += 1
 
     save_json(output_path, annotations)
-    LOGGER.info(
-        "Classification complete (total=%s kept=%s discarded=%s)",
-        len(annotations),
-        kept,
-        discarded,
-    )
-    print(f"Classified {len(annotations)} frames (kept {kept}, discarded {discarded})")
+    LOGGER.info("Classification complete (total=%s kept=%s discarded=%s provider=%s)",
+                len(annotations), kept, discarded, provider)
+    print(f"Classified {len(annotations)} frames (kept {kept}, discarded {discarded}) via {provider}/{model}")
     return 0
 
 

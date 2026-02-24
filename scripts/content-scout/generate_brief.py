@@ -10,11 +10,15 @@ import os
 from pathlib import Path
 from typing import Any
 
-from anthropic import Anthropic
-
 from _common import ensure_dir, load_json, resolve_path, setup_logging
 
 LOGGER = logging.getLogger("content_scout.generate_brief")
+
+# Default models per provider
+DEFAULT_MODELS = {
+    "anthropic": "claude-opus-4-20250514",
+    "openai": "gpt-4o",
+}
 
 BRIEF_INSTRUCTIONS = """
 You are producing a position-aware daily competitor content brief for Hans.
@@ -36,23 +40,33 @@ Requirements:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--annotations", default="tmp/annotations.json", help="Annotations JSON path")
-    parser.add_argument(
-        "--watchlist",
-        default="config/content-scout/watchlist.json",
-        help="Watchlist JSON path",
-    )
-    parser.add_argument(
-        "--output",
-        default="content-vault/daily/_daily-brief.md",
-        help="Output markdown path",
-    )
-    parser.add_argument(
-        "--model",
-        default="claude-opus-4-20250514",
-        help="Anthropic model for brief generation",
-    )
+    parser.add_argument("--watchlist", default="config/content-scout/watchlist.json",
+                        help="Watchlist JSON path")
+    parser.add_argument("--output", default="content-vault/daily/_daily-brief.md",
+                        help="Output markdown path")
+    parser.add_argument("--provider", choices=["anthropic", "openai", "auto"], default="auto",
+                        help="LLM provider (default: auto-detect from available API keys)")
+    parser.add_argument("--model", default=None, help="Model name (default: provider-specific)")
     parser.add_argument("--verbose", action="store_true", help="Enable debug logs")
     return parser.parse_args()
+
+
+def detect_provider(requested: str) -> str:
+    """Detect which provider to use based on available API keys."""
+    if requested != "auto":
+        return requested
+
+    has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    has_openai = bool(os.environ.get("OPENAI_API_KEY"))
+
+    if has_anthropic:
+        return "anthropic"
+    if has_openai:
+        return "openai"
+
+    raise RuntimeError(
+        "No API key found. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in the environment."
+    )
 
 
 def build_prompt(annotations: list[dict[str, Any]], watchlist: dict[str, Any]) -> str:
@@ -66,13 +80,33 @@ def build_prompt(annotations: list[dict[str, Any]], watchlist: dict[str, Any]) -
     )
 
 
-def extract_response_text(response: Any) -> str:
+def call_anthropic(prompt: str, model: str) -> str:
+    from anthropic import Anthropic
+    client = Anthropic()
+    response = client.messages.create(
+        model=model,
+        max_tokens=4096,
+        temperature=0.2,
+        messages=[{"role": "user", "content": prompt}],
+    )
     parts: list[str] = []
     for block in getattr(response, "content", []) or []:
         text = getattr(block, "text", None)
         if text:
             parts.append(text)
     return "\n".join(parts).strip()
+
+
+def call_openai(prompt: str, model: str) -> str:
+    from openai import OpenAI
+    client = OpenAI()
+    response = client.chat.completions.create(
+        model=model,
+        max_tokens=4096,
+        temperature=0.2,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return (response.choices[0].message.content or "").strip()
 
 
 def main() -> int:
@@ -89,28 +123,28 @@ def main() -> int:
     if not isinstance(annotations, list):
         raise ValueError(f"Annotations file must contain a list: {annotations_path}")
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise RuntimeError("ANTHROPIC_API_KEY is required for daily brief generation")
+    provider = detect_provider(args.provider)
+    model = args.model or DEFAULT_MODELS[provider]
+    LOGGER.info("Using provider=%s model=%s", provider, model)
 
-    client = Anthropic()
     prompt = build_prompt(annotations, watchlist)
 
-    response = client.messages.create(
-        model=args.model,
-        max_tokens=4096,
-        temperature=0.2,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    call_fn = call_anthropic if provider == "anthropic" else call_openai
 
-    markdown = extract_response_text(response)
+    try:
+        markdown = call_fn(prompt, model)
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.exception("Brief generation failed: %s", exc)
+        markdown = ""
+
     if not markdown:
         markdown = "# Daily Brief\n\nNo content generated."
 
     ensure_dir(output_path.parent)
     output_path.write_text(markdown, encoding="utf-8")
 
-    LOGGER.info("Daily brief written to %s", output_path)
-    print(f"Generated daily brief at {output_path}")
+    LOGGER.info("Daily brief written to %s via %s/%s", output_path, provider, model)
+    print(f"Generated daily brief at {output_path} via {provider}/{model}")
     return 0
 
 
