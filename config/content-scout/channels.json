@@ -1,4 +1,82 @@
-{
-  "channels": [],
-  "_note": "Populate with Hans's competitor YouTube channels. Format: { id, name, slug, url, priority: high|medium|low, status: active }"
-}
+[
+  {
+    "name": "tastylive",
+    "url": "https://www.youtube.com/@tastyliveshow",
+    "handle": "@tastyliveshow",
+    "category": "options-education",
+    "notes": "Major options platform. 8hrs live daily. Premium selling focus. Huge library.",
+    "priority": "high"
+  },
+  {
+    "name": "Option Alpha",
+    "url": "https://www.youtube.com/@optionalpha",
+    "handle": "@optionalpha",
+    "category": "options-education",
+    "notes": "Beginner-friendly options education. Selling premium, high probability strategies. Automated trading focus.",
+    "priority": "high"
+  },
+  {
+    "name": "Sky View Trading",
+    "url": "https://www.youtube.com/@skyviewtrading",
+    "handle": "@skyviewtrading",
+    "category": "options-strategies",
+    "notes": "In-depth strategy videos. Whiteboard-style Greeks explanations. Premium selling case studies.",
+    "priority": "high"
+  },
+  {
+    "name": "projectfinance",
+    "url": "https://www.youtube.com/@projectfinance",
+    "handle": "@projectfinance",
+    "category": "options-education",
+    "notes": "Chris Butler. Clean educational content on common options strategies. Well-produced.",
+    "priority": "high"
+  },
+  {
+    "name": "InTheMoney",
+    "url": "https://www.youtube.com/@InTheMoneyAdam",
+    "handle": "@InTheMoneyAdam",
+    "category": "options-education",
+    "notes": "Adam. 320K+ subs, 14M+ views. Younger audience. Makes options accessible.",
+    "priority": "high"
+  },
+  {
+    "name": "BestStockStrategy",
+    "url": "https://www.youtube.com/@BestStockStrategy",
+    "handle": "@BestStockStrategy",
+    "category": "options-selling",
+    "notes": "David Jaffee. Options selling focused. Direct competitor to premium-selling education.",
+    "priority": "medium"
+  },
+  {
+    "name": "Adam Khoo",
+    "url": "https://www.youtube.com/@AdamKhoo",
+    "handle": "@AdamKhoo",
+    "category": "stocks-and-options",
+    "notes": "Professional trader. Stocks + options strategies. Large following.",
+    "priority": "medium"
+  },
+  {
+    "name": "ClayTrader",
+    "url": "https://www.youtube.com/@ClayTrader",
+    "handle": "@ClayTrader",
+    "category": "day-trading",
+    "notes": "Day trading focus. Engaging content style. Large community.",
+    "priority": "medium"
+  },
+  {
+    "name": "Options Trading IQ",
+    "url": "https://www.youtube.com/@optionstradingiq",
+    "handle": "@optionstradingiq",
+    "category": "options-strategies",
+    "notes": "Gavin McMaster. Strategy deep-dives, current market conditions, advanced techniques.",
+    "priority": "medium"
+  },
+  {
+    "name": "Trading Fraternity",
+    "url": "https://www.youtube.com/@TradingFraternity",
+    "handle": "@TradingFraternity",
+    "category": "day-trading",
+    "notes": "Live trading sessions. Real-time market analysis.",
+    "priority": "low"
+  }
+]

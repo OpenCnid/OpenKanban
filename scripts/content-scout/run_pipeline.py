@@ -112,8 +112,10 @@ def script_path(script_name: str) -> str:
     return str((Path(__file__).resolve().parent / script_name).resolve())
 
 
-def build_steps(pipeline_date: str) -> list[StepSpec]:
+def build_steps(pipeline_date: str, run_id: str | None = None) -> list[StepSpec]:
     daily_dir = f"content-vault/daily/{pipeline_date}"
+    # Use run_id for unique brief naming; fall back to _daily-brief for compat
+    brief_name = f"_brief-{run_id}.md" if run_id else "_daily-brief.md"
 
     return [
         StepSpec(
@@ -258,7 +260,7 @@ def build_steps(pipeline_date: str) -> list[StepSpec]:
                 "--watchlist",
                 "config/content-scout/watchlist.json",
                 "--output",
-                f"{daily_dir}/_daily-brief.md",
+                f"{daily_dir}/{brief_name}",
                 "--provider",
                 "auto",
             ],
@@ -350,7 +352,9 @@ def main() -> int:
     setup_logging(args.verbose)
 
     pipeline_date = normalize_date(args.date)
-    steps = build_steps(pipeline_date)
+    # Generate a run_id from timestamp for unique brief naming (multiple runs/day)
+    run_id = datetime.utcnow().strftime("%H%M%S")
+    steps = build_steps(pipeline_date, run_id=run_id)
 
     state_path = resolve_path("tmp/_pipeline_state.json")
     persist_state = not args.dry_run

@@ -1,22 +1,29 @@
 {
   "highRelevance": [
-    "options", "calls", "puts", "strike", "expiration",
-    "SPY", "QQQ", "NVDA", "AAPL", "TSLA", "AMD", "META",
-    "support", "resistance", "breakout", "breakdown",
-    "earnings", "IV", "implied volatility", "gamma",
-    "unusual activity", "dark pool", "flow",
-    "weekly", "0DTE", "scalp"
+    "options selling", "premium selling", "cash flow", "covered calls",
+    "credit spreads", "iron condor", "iron butterfly", "put selling",
+    "wheel strategy", "options income", "theta decay", "theta gang",
+    "implied volatility", "IV rank", "IV percentile", "volatility crush",
+    "options Greeks", "delta neutral", "gamma risk", "vega",
+    "SPY", "QQQ", "NVDA", "AAPL", "TSLA", "AMD", "META", "AMZN",
+    "earnings play", "earnings straddle", "LEAPS",
+    "risk management", "position sizing", "portfolio margin",
+    "Bollinger Bands", "options skew", "VIX"
   ],
   "mediumRelevance": [
-    "chart", "analysis", "setup", "trade", "entry", "exit",
-    "bullish", "bearish", "neutral", "spread",
+    "options", "calls", "puts", "strike", "expiration",
+    "spread", "debit spread", "butterfly", "condor", "strangle", "straddle",
+    "technical analysis", "chart", "support", "resistance",
     "RSI", "MACD", "moving average", "volume",
-    "sector", "rotation", "momentum",
-    "watchlist", "scanner", "screener"
+    "trade management", "rolling options", "assignment",
+    "watchlist", "scanner", "screener",
+    "sector rotation", "momentum", "trend",
+    "0DTE", "weekly options", "monthly options"
   ],
   "exclude": [
     "giveaway", "unboxing", "vlog", "day in my life",
-    "beginner", "what is a stock", "how to open",
-    "crypto", "forex", "NFT", "memecoin"
+    "what is a stock", "how to open an account",
+    "crypto", "forex", "NFT", "memecoin", "bitcoin",
+    "penny stocks", "pump and dump"
   ]
 }
