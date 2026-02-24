@@ -157,7 +157,7 @@ def build_steps(pipeline_date: str, run_id: str | None = None) -> list[StepSpec]
                 "--output-dir",
                 "tmp/frames",
                 "--interval",
-                "5",
+                "15",
                 "--hash-threshold",
                 "5",
             ],

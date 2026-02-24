@@ -78,13 +78,18 @@ def load_processed_ids(log_path: Path) -> set[str]:
 
 
 def fetch_channel_entries(channel_url: str, playlist_end: int) -> list[dict[str, Any]]:
+    # Ensure we hit the /videos tab, not the channel root (which returns tab listings)
+    url = channel_url.rstrip("/")
+    if not url.endswith("/videos"):
+        url += "/videos"
+
     cmd = [
         "yt-dlp",
         "--flat-playlist",
         "--playlist-end",
         str(playlist_end),
         "--dump-single-json",
-        channel_url,
+        url,
     ]
     LOGGER.debug("Running: %s", " ".join(cmd))
     completed = run_command(cmd, check=True)
@@ -153,9 +158,15 @@ def main() -> int:
     channels_payload = load_json(channels_path, default={})
     keywords_payload = load_json(keywords_path, default={})
 
+    # Support both {"channels": [...]} and plain [...] formats
+    if isinstance(channels_payload, list):
+        channels_list = channels_payload
+    else:
+        channels_list = channels_payload.get("channels", [])
+
     channels = [
         channel
-        for channel in channels_payload.get("channels", [])
+        for channel in channels_list
         if isinstance(channel, dict) and channel.get("status", "active") == "active"
     ]
 
@@ -192,7 +203,7 @@ def main() -> int:
             LOGGER.exception("Failed to fetch channel %s: %s", channel_name, exc)
             continue
 
-        for entry in entries:
+        for position, entry in enumerate(entries):
             scanned += 1
             video_id = str(entry.get("id") or "")
             title = str(entry.get("title") or "").strip()
@@ -202,18 +213,23 @@ def main() -> int:
                 continue
             if video_id in processed_ids:
                 continue
-            if duration < args.min_duration or duration > args.max_duration:
+            # Duration 0 means flat-playlist didn't return it; allow through
+            if duration > 0 and (duration < args.min_duration or duration > args.max_duration):
                 continue
             if title_contains_any(title, exclude_keywords):
                 continue
 
             upload_dt = extract_upload_datetime(entry)
-            if upload_dt is None:
-                LOGGER.debug("Skipping %s without upload timestamp", video_id)
-                continue
-            hours_since_upload = (now - upload_dt).total_seconds() / 3600
-            if hours_since_upload < 0 or hours_since_upload > 24:
-                continue
+            if upload_dt is not None:
+                hours_since_upload = (now - upload_dt).total_seconds() / 3600
+                if hours_since_upload < 0:
+                    continue
+                upload_iso = upload_dt.isoformat()
+            else:
+                # No timestamp available — use playlist position as recency proxy
+                # Position 0 = most recent, assume ~12h per position as rough estimate
+                hours_since_upload = float(position) * 12.0
+                upload_iso = None
 
             keyword_score, _matched_keywords = collect_keyword_score(
                 title,
@@ -237,7 +253,7 @@ def main() -> int:
                     "channelId": channel_id,
                     "channelName": channel_name,
                     "channelSlug": channel_slug,
-                    "uploadDate": upload_dt.isoformat(),
+                    "uploadDate": upload_iso,
                     "duration": duration,
                     "score": round(score, 6),
                 }
