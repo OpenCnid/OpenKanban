@@ -102,10 +102,18 @@ def main() -> int:
                 bucket.append(path_value)
                 updates += 1
 
+    # Clean up: remove stale category entries from prior runs + deduplicate paths
+    cleaned = 0
     for tag in list(existing):
+        if tag.upper() in CATEGORY_NAMES:
+            del existing[tag]
+            cleaned += 1
+            continue
         paths = existing.get(tag, [])
         if isinstance(paths, list):
             existing[tag] = sorted(set(str(path) for path in paths))
+    if cleaned:
+        LOGGER.info("Removed %d stale category tags from index", cleaned)
 
     ensure_dir(tag_index_path.parent)
     save_json(tag_index_path, existing)
