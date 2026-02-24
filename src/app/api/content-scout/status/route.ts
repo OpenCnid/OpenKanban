@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
+import { queryOne } from '@/lib/db';
 
 const APP_ROOT = path.resolve(process.cwd());
 const STATE_FILE = path.join(APP_ROOT, 'tmp', '_pipeline_state.json');
@@ -14,10 +15,22 @@ const LOG_FILE = path.join(APP_ROOT, 'content-vault', 'processing-log.json');
 export async function GET() {
   const result: Record<string, any> = {
     running: false,
+    runId: null,
     currentState: null,
     lastRun: null,
     todayStats: null,
   };
+
+  const activeRun = queryOne<{ id: string }>(
+    `SELECT id
+     FROM workflow_runs
+     WHERE status = 'running' AND trigger_method = 'content-scout'
+     ORDER BY started_at DESC
+     LIMIT 1`
+  );
+  if (activeRun?.id) {
+    result.runId = activeRun.id;
+  }
 
   // Check pipeline state
   if (fs.existsSync(STATE_FILE)) {
