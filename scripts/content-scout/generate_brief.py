@@ -73,6 +73,8 @@ Summary table of everything analyzed.
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--annotations", default="tmp/annotations.json", help="Annotations JSON path")
+    parser.add_argument("--transcripts-dir", default="tmp/transcripts",
+                        help="Directory containing full transcript JSON files")
     parser.add_argument("--watchlist", default="config/content-scout/watchlist.json",
                         help="Watchlist JSON path")
     parser.add_argument("--output", default="content-vault/daily/_daily-brief.md",
@@ -102,15 +104,65 @@ def detect_provider(requested: str) -> str:
     )
 
 
-def build_prompt(annotations: list[dict[str, Any]], watchlist: dict[str, Any]) -> str:
+def load_transcripts(transcripts_dir: Path) -> dict[str, str]:
+    """Load full transcripts from JSON files, keyed by video ID."""
+    transcripts: dict[str, str] = {}
+    if not transcripts_dir.exists():
+        return transcripts
+    for path in sorted(transcripts_dir.glob("*_transcript.json")):
+        video_id = path.stem.replace("_transcript", "")
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                # Whisper segments format
+                full_text = " ".join(seg.get("text", "").strip() for seg in data if seg.get("text"))
+            elif isinstance(data, dict):
+                full_text = data.get("text", "")
+            else:
+                full_text = str(data)
+            transcripts[video_id] = full_text
+        except Exception:
+            LOGGER.warning("Could not load transcript %s", path)
+    return transcripts
+
+
+def build_prompt(annotations: list[dict[str, Any]], watchlist: dict[str, Any],
+                 transcripts: dict[str, str] | None = None) -> str:
     kept = [item for item in annotations if item.get("kept")]
-    return (
-        f"{BRIEF_INSTRUCTIONS}\n\n"
-        "Watchlist JSON:\n"
-        f"{json.dumps(watchlist, indent=2, ensure_ascii=False)}\n\n"
-        "Frame Annotations JSON:\n"
-        f"{json.dumps(kept, indent=2, ensure_ascii=False)}\n"
-    )
+
+    # Build compact annotation summary (skip redundant transcriptWindow to save tokens)
+    compact_annotations = []
+    for item in kept:
+        compact = {k: v for k, v in item.items()
+                   if k != "transcriptWindow" and k != "raw" and v is not None}
+        compact_annotations.append(compact)
+
+    parts = [BRIEF_INSTRUCTIONS, "\n"]
+
+    if watchlist:
+        parts.append("Watchlist JSON:\n")
+        parts.append(json.dumps(watchlist, indent=2, ensure_ascii=False))
+        parts.append("\n\n")
+
+    # Include full transcripts for each video (much richer context than frame snippets)
+    if transcripts:
+        parts.append("FULL VIDEO TRANSCRIPTS (use these for understanding what was said):\n\n")
+        for video_id, text in transcripts.items():
+            # Find video title from annotations
+            title = next((a.get("videoTitle", video_id) for a in kept if a.get("videoId") == video_id), video_id)
+            channel = next((a.get("channelName", "?") for a in kept if a.get("videoId") == video_id), "?")
+            parts.append(f"--- {channel}: {title} (ID: {video_id}) ---\n")
+            # Truncate to ~4000 chars per transcript to manage token budget
+            if len(text) > 4000:
+                parts.append(text[:4000] + "\n[...transcript truncated...]\n\n")
+            else:
+                parts.append(text + "\n\n")
+
+    parts.append("Frame Annotations (visual highlights only):\n")
+    parts.append(json.dumps(compact_annotations, indent=2, ensure_ascii=False))
+    parts.append("\n")
+
+    return "".join(parts)
 
 
 def call_anthropic(prompt: str, model: str) -> str:
@@ -154,6 +206,9 @@ def main() -> int:
 
     annotations = load_json(annotations_path, default=[])
     watchlist = load_json(watchlist_path, default={})
+    transcripts_dir = resolve_path(args.transcripts_dir)
+    transcripts = load_transcripts(transcripts_dir)
+    LOGGER.info("Loaded %d full transcripts from %s", len(transcripts), transcripts_dir)
 
     if not isinstance(annotations, list):
         raise ValueError(f"Annotations file must contain a list: {annotations_path}")
@@ -162,7 +217,7 @@ def main() -> int:
     model = args.model or DEFAULT_MODELS[provider]
     LOGGER.info("Using provider=%s model=%s", provider, model)
 
-    prompt = build_prompt(annotations, watchlist)
+    prompt = build_prompt(annotations, watchlist, transcripts=transcripts)
 
     call_fn = call_anthropic if provider == "anthropic" else call_openai
 

@@ -257,6 +257,8 @@ def build_steps(pipeline_date: str, run_id: str | None = None) -> list[StepSpec]
             args=[
                 "--annotations",
                 "tmp/annotations.json",
+                "--transcripts-dir",
+                "tmp/transcripts",
                 "--watchlist",
                 "config/content-scout/watchlist.json",
                 "--output",

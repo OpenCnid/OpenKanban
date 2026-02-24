@@ -86,7 +86,18 @@ def main() -> int:
     if not isinstance(annotations, list):
         raise ValueError(f"Annotations must be a list: {annotations_path}")
 
-    kept_annotations = [item for item in annotations if isinstance(item, dict) and item.get("kept")]
+    # Keep annotated frames, but skip storing TALKING_HEAD images (transcript is the value, not the image)
+    kept_annotations = [
+        item for item in annotations
+        if isinstance(item, dict) and item.get("kept")
+        and item.get("category") != "TALKING_HEAD"
+    ]
+    talking_heads = sum(
+        1 for item in annotations
+        if isinstance(item, dict) and item.get("kept") and item.get("category") == "TALKING_HEAD"
+    )
+    if talking_heads:
+        LOGGER.info("Skipped %d TALKING_HEAD frames (transcript-only value)", talking_heads)
     stored_index: list[dict[str, Any]] = []
     stored = 0
     failed = 0
@@ -122,15 +133,15 @@ def main() -> int:
                 "category": item.get("category"),
                 "confidence": item.get("confidence"),
                 "description": item.get("description"),
-                "key_data": item.get("key_data", []),
                 "verbal_context": item.get("verbal_context"),
+                "content_format": item.get("content_format"),
+                "visual_technique": item.get("visual_technique"),
+                "topic": item.get("topic"),
                 "insight": item.get("insight"),
-                "relevance": item.get("relevance"),
+                "hook_quality": item.get("hook_quality"),
+                "content_idea": item.get("content_idea"),
                 "tags": item.get("tags", []),
-                "content_angle": item.get("content_angle"),
                 "ticker": item.get("ticker"),
-                "timeframe": item.get("timeframe"),
-                "indicators": item.get("indicators", []),
                 "transcriptWindow": item.get("transcriptWindow"),
             }
 
