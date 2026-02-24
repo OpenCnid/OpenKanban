@@ -1,11 +1,48 @@
 [
   {
+    "name": "Jordi Visser Labs",
+    "url": "https://www.youtube.com/@JordiVisserLabs",
+    "handle": "@JordiVisserLabs",
+    "category": "macro-investing",
+    "notes": "30+ year Wall Street veteran. AI-driven macro investing. Deep market analysis. President/CIO of Weiss Multi-Strategy Advisers.",
+    "priority": "high",
+    "source": "hans"
+  },
+  {
+    "name": "The Compound",
+    "url": "https://www.youtube.com/@TheCompoundNews",
+    "handle": "@TheCompoundNews",
+    "category": "market-commentary",
+    "notes": "Joshua Brown & Michael Batnick. Wealth management perspective. Weekly market breakdowns, interviews, macro takes.",
+    "priority": "high",
+    "source": "hans"
+  },
+  {
+    "name": "Risk Reversal Media",
+    "url": "https://www.youtube.com/@RiskReversalMedia",
+    "handle": "@RiskReversalMedia",
+    "category": "options-macro",
+    "notes": "Dan Nathan & Guy Adami. Options-focused market commentary. Macro + single stock analysis. Connected to CNBC Fast Money.",
+    "priority": "high",
+    "source": "hans"
+  },
+  {
+    "name": "Peter Diamandis",
+    "url": "https://www.youtube.com/@peterdiamandis",
+    "handle": "@peterdiamandis",
+    "category": "futurism-technology",
+    "notes": "Futurist, tech visionary. AI/exponential tech trends. Not trading-specific but shapes macro thesis on tech sectors.",
+    "priority": "high",
+    "source": "hans"
+  },
+  {
     "name": "tastylive",
     "url": "https://www.youtube.com/@tastyliveshow",
     "handle": "@tastyliveshow",
     "category": "options-education",
     "notes": "Major options platform. 8hrs live daily. Premium selling focus. Huge library.",
-    "priority": "high"
+    "priority": "medium",
+    "source": "discovered"
   },
   {
     "name": "Option Alpha",
@@ -13,7 +50,8 @@
     "handle": "@optionalpha",
     "category": "options-education",
     "notes": "Beginner-friendly options education. Selling premium, high probability strategies. Automated trading focus.",
-    "priority": "high"
+    "priority": "medium",
+    "source": "discovered"
   },
   {
     "name": "Sky View Trading",
@@ -21,7 +59,8 @@
     "handle": "@skyviewtrading",
     "category": "options-strategies",
     "notes": "In-depth strategy videos. Whiteboard-style Greeks explanations. Premium selling case studies.",
-    "priority": "high"
+    "priority": "medium",
+    "source": "discovered"
   },
   {
     "name": "projectfinance",
@@ -29,7 +68,8 @@
     "handle": "@projectfinance",
     "category": "options-education",
     "notes": "Chris Butler. Clean educational content on common options strategies. Well-produced.",
-    "priority": "high"
+    "priority": "medium",
+    "source": "discovered"
   },
   {
     "name": "InTheMoney",
@@ -37,7 +77,8 @@
     "handle": "@InTheMoneyAdam",
     "category": "options-education",
     "notes": "Adam. 320K+ subs, 14M+ views. Younger audience. Makes options accessible.",
-    "priority": "high"
+    "priority": "medium",
+    "source": "discovered"
   },
   {
     "name": "BestStockStrategy",
@@ -45,38 +86,7 @@
     "handle": "@BestStockStrategy",
     "category": "options-selling",
     "notes": "David Jaffee. Options selling focused. Direct competitor to premium-selling education.",
-    "priority": "medium"
-  },
-  {
-    "name": "Adam Khoo",
-    "url": "https://www.youtube.com/@AdamKhoo",
-    "handle": "@AdamKhoo",
-    "category": "stocks-and-options",
-    "notes": "Professional trader. Stocks + options strategies. Large following.",
-    "priority": "medium"
-  },
-  {
-    "name": "ClayTrader",
-    "url": "https://www.youtube.com/@ClayTrader",
-    "handle": "@ClayTrader",
-    "category": "day-trading",
-    "notes": "Day trading focus. Engaging content style. Large community.",
-    "priority": "medium"
-  },
-  {
-    "name": "Options Trading IQ",
-    "url": "https://www.youtube.com/@optionstradingiq",
-    "handle": "@optionstradingiq",
-    "category": "options-strategies",
-    "notes": "Gavin McMaster. Strategy deep-dives, current market conditions, advanced techniques.",
-    "priority": "medium"
-  },
-  {
-    "name": "Trading Fraternity",
-    "url": "https://www.youtube.com/@TradingFraternity",
-    "handle": "@TradingFraternity",
-    "category": "day-trading",
-    "notes": "Live trading sessions. Real-time market analysis.",
-    "priority": "low"
+    "priority": "low",
+    "source": "discovered"
   }
 ]
