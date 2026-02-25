@@ -143,6 +143,14 @@ function updateRunStatus(runId: string, status: string, extra?: Record<string, u
   params.push(runId);
   run(`UPDATE workflow_runs SET ${updates.join(', ')} WHERE id = ?`, params);
 
+  // Auto-dismiss terminal runs so their tasks don't clutter the kanban board.
+  // Tasks are kept in DB for Pipeline View history but filtered out of the board
+  // by MissionQueue (which excludes tasks with workflow_run_id).
+  if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+    run('UPDATE workflow_runs SET dismissed = 1 WHERE id = ?', [runId]);
+    console.log(`[WorkflowEngine] Auto-dismissed terminal run ${runId} (${status})`);
+  }
+
   const updatedRun = queryOne<WorkflowRun>('SELECT * FROM workflow_runs WHERE id = ?', [runId]);
   if (updatedRun) {
     broadcast({ type: 'workflow_run_updated', payload: updatedRun });

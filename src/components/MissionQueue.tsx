@@ -25,8 +25,11 @@ export function MissionQueue({ workspaceId }: MissionQueueProps) {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
 
+  // Filter out pipeline tasks — they belong in Pipeline View, not the kanban board
+  const boardTasks = tasks.filter((task) => !task.workflow_run_id);
+
   const getTasksByStatus = (status: TaskStatus) =>
-    tasks.filter((task) => task.status === status);
+    boardTasks.filter((task) => task.status === status);
 
   const handleDragStart = (e: React.DragEvent, task: Task) => {
     setDraggedTask(task);
