@@ -1,0 +1,51 @@
+# OpenKanban — Agent Entry Point
+
+Workflow orchestration dashboard built on OpenClaw. Hans (non-technical trader)
+triggers, monitors, and approves multi-step AI pipelines from this dashboard.
+Fork of crshdn/mission-control v1.2.0.
+
+**Core principle:** OpenClaw is the orchestrator. OpenKanban is the visual control surface.
+
+## Stack
+Next.js 14 + TypeScript + Tailwind + SQLite (better-sqlite3) + Zustand + WebSocket (OpenClaw Gateway)
+
+## Quick Start
+```bash
+cd ~/clawd/projects/openkanban/app
+npm install
+npm run dev          # port 3000
+```
+
+## Key Files
+```
+src/lib/workflow-engine.ts         # Execution engine: templates, runs, steps
+src/lib/workflow-intelligence.ts   # Outcome tracking, success rates
+src/lib/workflow-router.ts         # Semantic routing (4-path LLM)
+src/lib/openclaw/client.ts         # Gateway client (WS + HTTP)
+src/app/api/workflows/trigger/     # Agent-initiated trigger endpoint
+src/components/pipeline/           # PipelineCard, StepChain, StepDetail, Filters
+src/components/MissionPrompt.tsx   # Primary trigger UI (text → agent figures out steps)
+src/components/LiveAgentsSidebar.tsx # Active sub-agent display
+config/content-scout/              # Channel configs, presets
+scripts/content-scout/             # Pipeline scripts (Python)
+```
+
+## Docs
+| Topic | Read |
+|-------|------|
+| Architecture (workflow engine, gateway, DB) | `docs/architecture.md` |
+| Workflow engine deep dive | `docs/workflow-engine.md` |
+| Deployment & setup | `docs/deployment.md` |
+| Operations (dev, debug, SQLite) | `docs/operations.md` |
+| Realtime system (SSE, WebSocket) | `docs/realtime.md` |
+| Content pipeline (Scout + Transcript) | `docs/content-pipeline.md` |
+| Feature specs | `docs/specs/` |
+
+## Gateway Config Required
+```json
+{ "gateway.tools.allow": ["sessions_spawn", "sessions_send", "cron"] }
+```
+
+## Key Distinction
+Hans ≠ Flvcko. FlvckoWatch = Flvcko's trading community (Cnid is dev-for-hire).
+OpenKanban + Content Scout = built for Hans, a different client.
