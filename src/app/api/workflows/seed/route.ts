@@ -40,6 +40,34 @@ const EXAMPLE_TEMPLATES = [
       { name: 'Distribute to Discord', agent_role: 'distributor', depends_on: 'Format for Distribution' },
     ],
   },
+  {
+    name: 'Content Scout Daily Brief',
+    description: 'Monitor YouTube channels for new uploads, download, extract and classify frames, transcribe audio, and generate a daily content brief with key takeaways. Runs the content-scout skill pipeline.',
+    icon: '📡',
+    trigger_type: 'schedule',
+    trigger_config: JSON.stringify({ schedule: '0 6 * * *', timezone: 'America/Chicago' }),
+    steps: [
+      { name: 'Select Videos', agent_role: 'scout', tools: ['content-scout'], timeoutSeconds: 120 },
+      { name: 'Download & Extract', agent_role: 'scout', depends_on: 'Select Videos', timeoutSeconds: 600, maxRetries: 1 },
+      { name: 'Classify & Transcribe', agent_role: 'analyst', depends_on: 'Download & Extract', timeoutSeconds: 900 },
+      { name: 'Generate Brief', agent_role: 'writer', depends_on: 'Classify & Transcribe', timeoutSeconds: 300 },
+      { name: 'Distribute', agent_role: 'distributor', depends_on: 'Generate Brief', destinations: ['notion'] },
+    ],
+  },
+  {
+    name: 'Transcript Studio',
+    description: 'Deep-process a YouTube video into a rich Notion page with speaker-diarized transcript, embedded visual frames, AI-generated summary with takeaways, chapters, and shorts candidates. Runs the transcript-studio skill pipeline. Use for processing individual videos.',
+    icon: '🎙️',
+    trigger_type: 'manual',
+    steps: [
+      { name: 'Download & Extract Frames', agent_role: 'scout', tools: ['content-scout', 'transcript-studio'], timeoutSeconds: 600, maxRetries: 1 },
+      { name: 'Transcribe & Diarize', agent_role: 'transcriber', depends_on: 'Download & Extract Frames', timeoutSeconds: 1800 },
+      { name: 'Classify & Merge Visuals', agent_role: 'analyst', depends_on: 'Transcribe & Diarize', timeoutSeconds: 600 },
+      { name: 'Summarize', agent_role: 'analyst', depends_on: 'Classify & Merge Visuals', timeoutSeconds: 300 },
+      { name: 'Upload Frames', agent_role: 'uploader', depends_on: 'Classify & Merge Visuals', timeoutSeconds: 300 },
+      { name: 'Export to Notion', agent_role: 'exporter', depends_on: 'Summarize', timeoutSeconds: 300 },
+    ],
+  },
 ];
 
 // POST /api/workflows/seed — create example workflow templates

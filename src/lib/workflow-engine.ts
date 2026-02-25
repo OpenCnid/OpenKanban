@@ -172,6 +172,14 @@ function buildStepPrompt(
 
   if (step.tools && step.tools.length > 0) {
     parts.push(`**Available tools:** ${step.tools.join(', ')}`);
+
+    if (step.tools.includes('content-scout')) {
+      parts.push('Use the content-scout skill for this step.');
+    }
+
+    if (step.tools.includes('transcript-studio')) {
+      parts.push('Use the transcript-studio skill for this step.');
+    }
   }
 
   if (triggerInput) {

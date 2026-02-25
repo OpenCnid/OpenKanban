@@ -63,6 +63,37 @@ const PATH_D_THRESHOLD = 0.3;
 
 // --- Core Functions ---
 
+function buildTriggerPhrases(template: WorkflowTemplate, steps: WorkflowStep[]): string[] {
+  const name = template.name.toLowerCase();
+
+  if (name === 'content scout daily brief') {
+    return [
+      'content scout',
+      'daily brief',
+      'youtube uploads',
+      'channel monitoring',
+      'content brief',
+    ];
+  }
+
+  if (name === 'transcript studio') {
+    return [
+      'transcript studio',
+      'speaker diarized transcript',
+      'video chapters',
+      'shorts candidates',
+      'notion transcript page',
+    ];
+  }
+
+  const fallback = steps
+    .slice(0, 3)
+    .map((s) => s.name.toLowerCase())
+    .filter(Boolean);
+
+  return fallback.length > 0 ? fallback : [template.name.toLowerCase()];
+}
+
 /**
  * Build a catalog summary of all active templates for LLM context.
  */
@@ -73,11 +104,14 @@ function buildTemplateCatalog(templates: WorkflowTemplate[]): string {
 
   return templates.map((t, i) => {
     const steps = typeof t.steps === 'string' ? JSON.parse(t.steps as unknown as string) : t.steps;
-    const stepNames = (steps as WorkflowStep[]).map(s => s.name).join(' → ');
+    const typedSteps = steps as WorkflowStep[];
+    const stepNames = typedSteps.map(s => s.name).join(' → ');
+    const triggerPhrases = buildTriggerPhrases(t, typedSteps).join(', ');
     return `[${i + 1}] ID: ${t.id}
     Name: ${t.name}
     Description: ${t.description || 'No description'}
     Trigger: ${t.trigger_type}
+    Trigger phrases: ${triggerPhrases}
     Steps: ${stepNames}
     Success rate: ${t.success_rate != null ? `${(t.success_rate * 100).toFixed(0)}%` : 'N/A'}
     Total runs: ${t.total_runs}`;
