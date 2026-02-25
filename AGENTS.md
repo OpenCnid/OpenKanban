@@ -39,12 +39,16 @@ scripts/content-scout/             # Pipeline scripts (Python)
 | Content pipeline (Scout + Transcript) | `docs/content-pipeline.md` |
 | Feature specs | `docs/specs/` |
 
-## Lint
+## Lint & Review
 ```bash
 npx eslint src/ --rulesdir eslint-rules/rules    # or: npm run lint
 ```
 Custom rules: `no-console-log` (warn) via `--rulesdir`.
 Built-in: `no-restricted-imports` blocks direct orchestration outside gateway client.
+
+**PR workflow:** Agent code → feature branch → `gh pr create` → review agent (Sonnet) → Cnid approves.
+Add `[skip-review]` to PR title for trivial changes.
+Note: PRs require OpenCnid org token (not stillforming token).
 
 ## Gateway Config Required
 ```json
