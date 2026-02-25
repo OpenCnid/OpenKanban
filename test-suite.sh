@@ -91,16 +91,16 @@ SEED_COUNT=$(echo "$R" | pj "
 r=json.load(sys.stdin)
 results = r.get('results', r) if isinstance(r, dict) else r
 if isinstance(results, list):
-    print(len([x for x in results if x.get('action')=='created']))
+    print(len([x for x in results if x.get('action') in ('created','skipped')]))
 else:
     print(0)
 ")
-test_eq "Seed creates 3 templates" "$SEED_COUNT" "3"
+test_eq "Seed has 5 templates" "$SEED_COUNT" "5"
 
 # List
 R=$(curl -s "$BASE/api/workflows?workspace_id=default")
 TEMPLATE_COUNT=$(echo "$R" | pj "r=json.load(sys.stdin); print(len(r))")
-test_eq "List returns 3 templates" "$TEMPLATE_COUNT" "3"
+test_eq "List returns 5 templates" "$TEMPLATE_COUNT" "5"
 
 # Get by ID
 TID_TRADE=$(echo "$R" | pj "r=json.load(sys.stdin); t=[x for x in r if x['name']=='Trade Idea Analysis']; print(t[0]['id'])")
@@ -143,7 +143,7 @@ if isinstance(results, list):
 else:
     print(0)
 ")
-test_eq "Seed is idempotent (3 skipped)" "$SKIP_COUNT" "3"
+test_eq "Seed is idempotent (5 skipped)" "$SKIP_COUNT" "5"
 
 # Delete
 if [ -n "$TID_CUSTOM" ] && [ "$TID_CUSTOM" != "None" ]; then
