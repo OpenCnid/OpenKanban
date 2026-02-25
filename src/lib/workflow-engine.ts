@@ -204,6 +204,16 @@ function buildStepPrompt(
     parts.push(`\n### Distribution\nSend output to: ${step.destinations.join(', ')}`);
   }
 
+  // Context management guidance for heavy steps
+  if (step.agent_role === 'analyst' || step.agent_role === 'transcriber') {
+    parts.push('\n### ⚠️ Context Management');
+    parts.push('Process each video/item independently to avoid context overflow:');
+    parts.push('1. Process one video at a time');
+    parts.push('2. Save results to disk after each video');
+    parts.push('3. Do NOT accumulate all outputs in conversation history');
+    parts.push('4. If classifying frames, process and save per-video — do not load all frames at once');
+  }
+
   parts.push('\n---');
   parts.push('When complete, provide your output clearly. The next step in the pipeline depends on your result.');
 
