@@ -617,6 +617,11 @@ def resolve_image_url(base_url: str, image_path: str) -> str:
         return clean_path
     if clean_path.startswith("./"):
         clean_path = clean_path[2:]
+    # Strip common local prefixes (tmp/frames/, frames/, etc.)
+    for prefix in ("tmp/frames/", "frames/", "tmp/"):
+        if clean_path.startswith(prefix):
+            clean_path = clean_path[len(prefix):]
+            break
     return urljoin(clean_base.rstrip("/") + "/", clean_path.lstrip("/"))
 
 
