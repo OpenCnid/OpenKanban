@@ -182,6 +182,21 @@ def normalize_visuals(annotations: list[dict[str, Any]], frames_dir: Path) -> li
     return visuals
 
 
+def filter_annotations_for_video(
+    annotations: list[dict[str, Any]],
+    video_id: str,
+) -> list[dict[str, Any]]:
+    if not video_id:
+        return annotations
+
+    with_video_id = [item for item in annotations if isinstance(item, dict) and item.get("videoId") is not None]
+    if not with_video_id:
+        return annotations
+
+    filtered = [item for item in annotations if str(item.get("videoId") or "").strip() == video_id]
+    return filtered
+
+
 def assign_visuals_to_segments(
     segments: list[dict[str, Any]],
     visuals: list[dict[str, Any]],
@@ -261,16 +276,22 @@ def main() -> int:
         if not isinstance(annotations, list):
             raise ContentScoutError(f"Annotations must be a list: {annotations_path}")
 
+        transcript_video_id = str(
+            transcript_payload.get("videoId") or transcript_path.stem.replace("_transcript", "")
+        ).strip()
+        scoped_annotations = filter_annotations_for_video(annotations, transcript_video_id)
+
         segments = normalize_segments(transcript_payload)
-        visuals = normalize_visuals(annotations, frames_dir)
+        visuals = normalize_visuals(scoped_annotations, frames_dir)
         visual_mapping = assign_visuals_to_segments(segments, visuals)
         events = build_event_sequence(segments, visual_mapping)
         merged_blocks = inject_timestamp_blocks(events)
 
         save_json(output_path, merged_blocks)
         LOGGER.info(
-            "Merged transcript written to %s (segments=%s embed_visuals=%s blocks=%s)",
+            "Merged transcript written to %s (video=%s segments=%s embed_visuals=%s blocks=%s)",
             output_path,
+            transcript_video_id or "unknown",
             len(segments),
             len(visuals),
             len(merged_blocks),

@@ -201,16 +201,22 @@ def compact_transcript_segments(segments: list[dict[str, Any]]) -> list[dict[str
     ]
 
 
-def normalize_annotations(payload: Any) -> list[dict[str, Any]]:
+def normalize_annotations(payload: Any, video_id: str | None = None) -> list[dict[str, Any]]:
     if payload is None:
         return []
     if not isinstance(payload, list):
         raise ContentScoutError("Annotations must be a list")
 
+    candidate_rows: list[dict[str, Any]] = [item for item in payload if isinstance(item, dict)]
+    if video_id:
+        with_video_id = [item for item in candidate_rows if item.get("videoId") is not None]
+        if with_video_id:
+            candidate_rows = [
+                item for item in candidate_rows if str(item.get("videoId") or "").strip() == video_id
+            ]
+
     visuals: list[dict[str, Any]] = []
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
+    for item in candidate_rows:
         if not item.get("kept"):
             continue
         category = str(item.get("category") or "").strip().upper()
@@ -486,7 +492,10 @@ def main() -> int:
         if args.annotations:
             annotations_path = resolve_path(args.annotations)
             annotations_payload = load_json(annotations_path, default=[])
-        visual_annotations = normalize_annotations(annotations_payload)
+        video_id = str(
+            transcript_payload.get("videoId") or transcript_path.stem.replace("_transcript", "")
+        ).strip()
+        visual_annotations = normalize_annotations(annotations_payload, video_id=video_id)
 
         metadata = transcript_metadata(transcript_payload, transcript_path, segments)
         prompt = build_prompt(metadata, segments, visual_annotations)
