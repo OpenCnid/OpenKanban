@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import logging
 import os
 import time
@@ -133,13 +134,17 @@ def paragraph_block(content: str) -> dict[str, Any]:
     }
 
 
-def speaker_paragraph_block(speaker: str, content: str) -> dict[str, Any]:
-    rich_text = to_rich_text_objects(f"{speaker}: ", bold=True) + to_rich_text_objects(content)
+def paragraph_rich_text_block(rich_text: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "object": "block",
         "type": "paragraph",
         "paragraph": {"rich_text": rich_text},
     }
+
+
+def speaker_paragraph_block(speaker: str, content: str) -> dict[str, Any]:
+    rich_text = to_rich_text_objects(f"{speaker}: ", bold=True) + to_rich_text_objects(content)
+    return paragraph_rich_text_block(rich_text)
 
 
 def heading_block(
@@ -163,12 +168,44 @@ def heading_block(
     return payload
 
 
+def heading_rich_text_block(
+    level: int,
+    rich_text: list[dict[str, Any]],
+    *,
+    is_toggleable: bool = False,
+    children: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    heading_type = f"heading_{level}"
+    payload: dict[str, Any] = {
+        "object": "block",
+        "type": heading_type,
+        heading_type: {
+            "rich_text": rich_text if rich_text else to_rich_text_objects(""),
+            "is_toggleable": is_toggleable,
+        },
+    }
+    if children:
+        payload[heading_type]["children"] = children
+    return payload
+
+
 def callout_block(content: str, *, emoji: str = "ℹ️") -> dict[str, Any]:
     return {
         "object": "block",
         "type": "callout",
         "callout": {
             "rich_text": to_rich_text_objects(content),
+            "icon": {"type": "emoji", "emoji": emoji},
+        },
+    }
+
+
+def callout_rich_text_block(rich_text: list[dict[str, Any]], *, emoji: str = "ℹ️") -> dict[str, Any]:
+    return {
+        "object": "block",
+        "type": "callout",
+        "callout": {
+            "rich_text": rich_text if rich_text else to_rich_text_objects(""),
             "icon": {"type": "emoji", "emoji": emoji},
         },
     }
@@ -190,11 +227,22 @@ def bulleted_list_item_block(content: str) -> dict[str, Any]:
     }
 
 
-def image_block(url: str) -> dict[str, Any]:
+def bulleted_list_item_rich_text_block(rich_text: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "object": "block",
+        "type": "bulleted_list_item",
+        "bulleted_list_item": {"rich_text": rich_text if rich_text else to_rich_text_objects("")},
+    }
+
+
+def image_block(url: str, *, caption: str = "") -> dict[str, Any]:
+    image_payload: dict[str, Any] = {"type": "external", "external": {"url": url}}
+    if caption:
+        image_payload["caption"] = to_rich_text_objects(caption)
     return {
         "object": "block",
         "type": "image",
-        "image": {"type": "external", "external": {"url": url}},
+        "image": image_payload,
     }
 
 
@@ -345,8 +393,60 @@ def timestamp_from_summary_item(item: dict[str, Any], label_key: str, seconds_ke
     return format_timestamp(seconds)
 
 
-def summary_takeaway_children(summary_payload: dict[str, Any]) -> list[dict[str, Any]]:
-    children: list[dict[str, Any]] = []
+def parse_timestamp_seconds(value: Any) -> int:
+    as_text = normalize_text(value)
+    if not as_text:
+        return 0
+    if as_text.isdigit():
+        return int(as_text)
+
+    parts = as_text.split(":")
+    if len(parts) == 2 and all(part.isdigit() for part in parts):
+        minutes, seconds = int(parts[0]), int(parts[1])
+        return minutes * 60 + seconds
+    if len(parts) == 3 and all(part.isdigit() for part in parts):
+        hours, minutes, seconds = int(parts[0]), int(parts[1]), int(parts[2])
+        return hours * 3600 + minutes * 60 + seconds
+    return 0
+
+
+def chapter_rich_text(timestamp: str, title: str) -> list[dict[str, Any]]:
+    return to_rich_text_objects(timestamp, bold=True) + to_rich_text_objects(f" — {title}")
+
+
+def normalize_sentence(text: str) -> str:
+    clean = normalize_text(text)
+    if not clean:
+        return ""
+    if clean.endswith((".", "!", "?")):
+        return clean
+    return f"{clean}."
+
+
+def build_tldr(summary_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    sentences: list[str] = []
+    raw_takeaways = summary_payload.get("takeaways", [])
+    if isinstance(raw_takeaways, list):
+        for item in raw_takeaways[:3]:
+            if not isinstance(item, dict):
+                continue
+            sentence = normalize_sentence(normalize_text(item.get("text")))
+            if sentence:
+                sentences.append(sentence)
+
+    if not sentences:
+        fallback = "No summary takeaways were generated for this video."
+    else:
+        fallback = " ".join(sentences)
+
+    return [
+        heading_block(2, "TL;DR"),
+        paragraph_block(fallback),
+    ]
+
+
+def summary_takeaway_blocks(summary_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
     raw_takeaways = summary_payload.get("takeaways", [])
     if isinstance(raw_takeaways, list):
         for item in raw_takeaways:
@@ -356,14 +456,14 @@ def summary_takeaway_children(summary_payload: dict[str, Any]) -> list[dict[str,
             if not text:
                 continue
             timestamp = timestamp_from_summary_item(item, "timestamp", "timestamp_seconds")
-            children.append(numbered_list_item_block(f"{text} ({timestamp})"))
-    if not children:
-        children.append(numbered_list_item_block("No key takeaways generated."))
-    return children
+            blocks.append(numbered_list_item_block(f"{text} ({timestamp})"))
+    if not blocks:
+        blocks.append(numbered_list_item_block("No key takeaways generated."))
+    return blocks
 
 
-def summary_chapter_children(summary_payload: dict[str, Any]) -> list[dict[str, Any]]:
-    children: list[dict[str, Any]] = []
+def summary_chapter_blocks(summary_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
     raw_chapters = summary_payload.get("chapters", [])
     if isinstance(raw_chapters, list):
         for item in raw_chapters:
@@ -373,10 +473,30 @@ def summary_chapter_children(summary_payload: dict[str, Any]) -> list[dict[str, 
             if not title:
                 continue
             timestamp = timestamp_from_summary_item(item, "timestamp", "timestamp_seconds")
-            children.append(numbered_list_item_block(f"{timestamp} {title}"))
-    if not children:
-        children.append(numbered_list_item_block("No chapters generated."))
-    return children
+            blocks.append(bulleted_list_item_rich_text_block(chapter_rich_text(timestamp, title)))
+    if not blocks:
+        blocks.append(bulleted_list_item_block("No chapters generated."))
+    return blocks
+
+
+def short_callout(item: dict[str, Any]) -> dict[str, Any] | None:
+    start = timestamp_from_summary_item(item, "start", "start_seconds")
+    end = timestamp_from_summary_item(item, "end", "end_seconds")
+    hook = normalize_text(item.get("hook"), "n/a")
+    payoff = normalize_text(item.get("payoff"), "n/a")
+
+    if hook == "n/a" and payoff == "n/a":
+        return None
+
+    rich_text = (
+        to_rich_text_objects("Hook: ", bold=True)
+        + to_rich_text_objects(hook)
+        + to_rich_text_objects("\n")
+        + to_rich_text_objects("Payoff: ", bold=True)
+        + to_rich_text_objects(payoff)
+        + to_rich_text_objects(f"\n⏱️ {start} → {end}")
+    )
+    return callout_rich_text_block(rich_text, emoji="🎬")
 
 
 def summary_shorts_children(summary_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -386,30 +506,12 @@ def summary_shorts_children(summary_payload: dict[str, Any]) -> list[dict[str, A
         for item in raw_shorts:
             if not isinstance(item, dict):
                 continue
-
-            start = timestamp_from_summary_item(item, "start", "start_seconds")
-            end = timestamp_from_summary_item(item, "end", "end_seconds")
-            hook = normalize_text(item.get("hook"))
-            payoff = normalize_text(item.get("payoff"))
-            cta = normalize_text(item.get("cta"))
-            on_screen = normalize_text(item.get("on_screen_text"))
-
-            if not hook and not payoff and not cta and not on_screen:
-                continue
-
-            parts = [f"[{start} -> {end}]"]
-            if hook:
-                parts.append(f"Hook: {hook}")
-            if payoff:
-                parts.append(f"Payoff: {payoff}")
-            if on_screen:
-                parts.append(f"On-screen: {on_screen}")
-            if cta:
-                parts.append(f"CTA: {cta}")
-            children.append(numbered_list_item_block(" | ".join(parts)))
+            short_block = short_callout(item)
+            if short_block:
+                children.append(short_block)
 
     if not children:
-        children.append(numbered_list_item_block("No shorts/clip candidates generated."))
+        children.append(callout_block("No shorts/clip candidates generated.", emoji="🎬"))
     return children
 
 
@@ -423,62 +525,82 @@ def summary_slide_children(summary_payload: dict[str, Any]) -> list[dict[str, An
             text = normalize_text(item.get("text"), normalize_text(item.get("suggestion")))
             if not text:
                 continue
-            timestamp = timestamp_from_summary_item(item, "timestamp", "timestamp_seconds")
-            children.append(bulleted_list_item_block(f"{timestamp} - {text}"))
+            timestamp = normalize_text(item.get("timestamp"))
+            if timestamp:
+                children.append(bulleted_list_item_block(f"{text} ({timestamp})"))
+            else:
+                children.append(bulleted_list_item_block(text))
     if not children:
         children.append(bulleted_list_item_block("No slide/graphic notes generated."))
     return children
 
 
 def build_summary_blocks(summary_payload: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        heading_block(1, "Summary"),
+    blocks: list[dict[str, Any]] = [heading_block(2, "🎯 Key Takeaways")]
+    blocks.extend(summary_takeaway_blocks(summary_payload))
+    blocks.append(heading_block(2, "📑 Chapters"))
+    blocks.extend(summary_chapter_blocks(summary_payload))
+    blocks.append(
         heading_block(
             2,
-            "Key Takeaways",
-            is_toggleable=True,
-            children=summary_takeaway_children(summary_payload),
-        ),
-        heading_block(
-            2,
-            "Chapters",
-            is_toggleable=True,
-            children=summary_chapter_children(summary_payload),
-        ),
-        heading_block(
-            2,
-            "Shorts/Clip Candidates",
+            "🎬 Shorts & Clip Ideas",
             is_toggleable=True,
             children=summary_shorts_children(summary_payload),
-        ),
+        )
+    )
+    blocks.append(
         heading_block(
             2,
-            "Slide/Graphic Notes",
+            "📊 Slide & Graphic Notes",
             is_toggleable=True,
             children=summary_slide_children(summary_payload),
-        ),
-    ]
+        )
+    )
+    return blocks
+
+
+def merged_value_dict(item: dict[str, Any]) -> dict[str, Any]:
+    value = item.get("value")
+    return value if isinstance(value, dict) else {}
+
+
+def merged_attr(item: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in item and item.get(key) is not None:
+            return item.get(key)
+
+    nested = merged_value_dict(item)
+    for key in keys:
+        if nested.get(key) is not None:
+            return nested.get(key)
+    return None
+
+
+def seconds_from_value(value: Any) -> int:
+    if isinstance(value, str) and ":" in value:
+        return parse_timestamp_seconds(value)
+    return int(max(0.0, coerce_float(value, 0.0)))
 
 
 def visual_timestamp(item: dict[str, Any]) -> str:
-    label = normalize_text(item.get("timestamp_label"))
+    label = normalize_text(merged_attr(item, "timestamp_label", "label"))
     if label:
         return label
 
-    timestamp = item.get("timestamp")
+    timestamp = merged_attr(item, "timestamp")
     as_text = normalize_text(timestamp)
     if as_text and ":" in as_text:
         return as_text
     if as_text.isdigit():
         return format_timestamp(int(as_text))
 
-    seconds = int(max(0.0, coerce_float(item.get("timestamp_seconds"), 0.0)))
+    seconds = seconds_from_value(merged_attr(item, "timestamp_seconds", "seconds", "start"))
     return format_timestamp(seconds)
 
 
 def visual_type(item: dict[str, Any]) -> str:
     for key in ("visual_type", "visualType", "label", "category"):
-        value = normalize_text(item.get(key))
+        value = normalize_text(merged_attr(item, key))
         if value:
             return value
     return "Visual"
@@ -498,52 +620,222 @@ def resolve_image_url(base_url: str, image_path: str) -> str:
     return urljoin(clean_base.rstrip("/") + "/", clean_path.lstrip("/"))
 
 
-def build_transcript_blocks(
-    merged_payload: list[dict[str, Any]],
-    image_base_url: str,
-) -> tuple[list[dict[str, Any]], list[list[str]]]:
-    blocks: list[dict[str, Any]] = [heading_block(1, "Transcript with Visuals")]
-    visual_rows: list[list[str]] = []
+def normalize_chapters(chapters: Any) -> list[dict[str, Any]]:
+    raw_chapters = chapters if isinstance(chapters, list) else []
+    normalized: list[tuple[int, int, str, str]] = []
 
+    for index, item in enumerate(raw_chapters):
+        if not isinstance(item, dict):
+            continue
+
+        title = normalize_text(item.get("title"), normalize_text(item.get("text")))
+        if not title:
+            title = f"Chapter {len(normalized) + 1}"
+
+        raw_seconds = merged_attr(item, "timestamp_seconds", "seconds")
+        seconds = seconds_from_value(raw_seconds)
+        if seconds == 0:
+            seconds = parse_timestamp_seconds(item.get("timestamp"))
+
+        timestamp = normalize_text(item.get("timestamp"))
+        if not timestamp:
+            timestamp = format_timestamp(seconds)
+
+        normalized.append((seconds, index, timestamp, title))
+
+    normalized.sort(key=lambda row: (row[0], row[1]))
+
+    deduped: list[dict[str, Any]] = []
+    seen_seconds: set[int] = set()
+    for seconds, _, timestamp, title in normalized:
+        if seconds in seen_seconds:
+            continue
+        seen_seconds.add(seconds)
+        deduped.append(
+            {
+                "seconds": seconds,
+                "timestamp": timestamp,
+                "title": title,
+            }
+        )
+
+    if not deduped:
+        return [{"seconds": 0, "timestamp": "00:00", "title": "Opening"}]
+
+    if deduped[0]["seconds"] > 0:
+        deduped.insert(0, {"seconds": 0, "timestamp": "00:00", "title": "Opening"})
+    return deduped
+
+
+def merge_text_fragments(fragments: list[str]) -> str:
+    merged = ""
+    no_space_before = (",", ".", "!", "?", ";", ":", ")", "]")
+    no_space_after = ("-", "—", "–", "/")
+
+    for fragment in fragments:
+        piece = normalize_text(fragment)
+        if not piece:
+            continue
+        if not merged:
+            merged = piece
+            continue
+        if merged.endswith(no_space_after) or piece.startswith(no_space_before):
+            merged += piece
+        else:
+            merged += f" {piece}"
+    return merged
+
+
+def visual_to_block(item: dict[str, Any], image_base_url: str) -> dict[str, Any]:
+    timestamp = visual_timestamp(item)
+    v_type = visual_type(item)
+    description = normalize_text(merged_attr(item, "description"), "No description")
+    caption = f"{timestamp} — {v_type}: {description}"
+
+    image_path = normalize_text(
+        merged_attr(item, "image_path", "imagePath", "framePath", "frame")
+    )
+    image_url = resolve_image_url(image_base_url, image_path)
+    if image_url:
+        return image_block(image_url, caption=caption)
+    return callout_block(caption, emoji="🖼️")
+
+
+def collect_visual_rows(merged_payload: list[dict[str, Any]]) -> list[list[str]]:
+    rows: list[list[str]] = []
     for item in merged_payload:
         if not isinstance(item, dict):
             continue
-        block_type = normalize_text(item.get("type")).lower()
+        if normalize_text(merged_attr(item, "type")).lower() != "visual":
+            continue
+        timestamp = visual_timestamp(item)
+        v_type = visual_type(item)
+        description = normalize_text(merged_attr(item, "description"), "No description")
+        rows.append([timestamp, v_type, description])
+    return rows
 
+
+def merge_transcript_paragraphs(
+    merged_blocks: list[dict[str, Any]],
+    chapters: list[dict[str, Any]],
+    speaker_total: int,
+    image_base_url: str = "",
+) -> list[dict[str, Any]]:
+    chapter_defs = normalize_chapters(chapters)
+    chapter_starts = [chapter["seconds"] for chapter in chapter_defs]
+    events_by_chapter: list[list[dict[str, Any]]] = [[] for _ in chapter_defs]
+
+    for item in merged_blocks:
+        if not isinstance(item, dict):
+            continue
+        block_type = normalize_text(merged_attr(item, "type")).lower()
         if block_type == "timestamp":
-            label = normalize_text(item.get("value"), visual_timestamp(item))
-            if label:
-                blocks.append(heading_block(3, label))
             continue
 
         if block_type == "text":
-            speaker = normalize_text(item.get("speaker"), "Speaker 1")
-            text = normalize_text(item.get("text"))
-            if text:
-                blocks.append(speaker_paragraph_block(speaker, text))
+            text = normalize_text(merged_attr(item, "text", "content"))
+            if not text:
+                continue
+            speaker = normalize_text(merged_attr(item, "speaker"), "Speaker 1")
+            start_seconds = seconds_from_value(merged_attr(item, "start", "timestamp", "seconds"))
+            chapter_index = max(0, bisect.bisect_right(chapter_starts, start_seconds) - 1)
+            chapter_index = min(chapter_index, len(events_by_chapter) - 1)
+            events_by_chapter[chapter_index].append(
+                {
+                    "type": "text",
+                    "speaker": speaker,
+                    "text": text,
+                }
+            )
             continue
 
         if block_type != "visual":
             continue
 
-        timestamp = visual_timestamp(item)
-        v_type = visual_type(item)
-        description = normalize_text(item.get("description"), "No description")
-        caption = f"[Visual @ {timestamp} — {v_type}] {description}"
-        blocks.append(paragraph_block(caption))
+        visual_seconds = seconds_from_value(merged_attr(item, "timestamp_seconds", "timestamp", "seconds"))
+        chapter_index = max(0, bisect.bisect_right(chapter_starts, visual_seconds) - 1)
+        chapter_index = min(chapter_index, len(events_by_chapter) - 1)
+        events_by_chapter[chapter_index].append(item)
 
-        image_path = normalize_text(item.get("image_path"), normalize_text(item.get("imagePath")))
-        image_url = resolve_image_url(image_base_url, image_path)
-        if image_url:
-            blocks.append(image_block(image_url))
-        else:
-            blocks.append(callout_block(f"{v_type} @ {timestamp}: {description}", emoji="🖼️"))
+    blocks: list[dict[str, Any]] = []
+    multi_speaker = speaker_total > 1
 
-        visual_rows.append([timestamp, v_type, description])
+    for chapter, chapter_events in zip(chapter_defs, events_by_chapter):
+        blocks.append(
+            heading_rich_text_block(
+                3,
+                chapter_rich_text(chapter["timestamp"], chapter["title"]),
+            )
+        )
 
-    if len(blocks) == 1:
+        turn_speaker = ""
+        turn_fragments: list[str] = []
+
+        def flush_turn() -> None:
+            nonlocal turn_speaker, turn_fragments
+            if not turn_fragments:
+                return
+            text = merge_text_fragments(turn_fragments)
+            if not text:
+                turn_fragments = []
+                turn_speaker = ""
+                return
+            if multi_speaker:
+                blocks.append(speaker_paragraph_block(turn_speaker, text))
+            else:
+                blocks.append(paragraph_block(text))
+            turn_fragments = []
+            turn_speaker = ""
+
+        for event in chapter_events:
+            event_type = normalize_text(merged_attr(event, "type")).lower()
+            if event_type == "text":
+                speaker = normalize_text(merged_attr(event, "speaker"), "Speaker 1")
+                text = normalize_text(merged_attr(event, "text"))
+                if not text:
+                    continue
+                if not turn_fragments:
+                    turn_speaker = speaker
+                    turn_fragments = [text]
+                    continue
+                if speaker == turn_speaker:
+                    turn_fragments.append(text)
+                    continue
+
+                flush_turn()
+                turn_speaker = speaker
+                turn_fragments = [text]
+                continue
+
+            if event_type == "visual":
+                flush_turn()
+                blocks.append(visual_to_block(event, image_base_url))
+
+        flush_turn()
+
+    return blocks
+
+
+def build_transcript_blocks(
+    merged_payload: list[dict[str, Any]],
+    image_base_url: str,
+    chapters: list[dict[str, Any]] | None = None,
+    speaker_total: int = 1,
+) -> tuple[list[dict[str, Any]], list[list[str]]]:
+    visual_rows = collect_visual_rows(merged_payload)
+    chapter_source = chapters if isinstance(chapters, list) else []
+    transcript_children = merge_transcript_paragraphs(
+        merged_payload,
+        chapter_source,
+        speaker_total,
+        image_base_url,
+    )
+
+    blocks: list[dict[str, Any]] = [heading_block(1, "Full Transcript")]
+    if transcript_children:
+        blocks.extend(transcript_children)
+    else:
         blocks.append(paragraph_block("No merged transcript blocks were found."))
-
     return blocks, visual_rows
 
 
@@ -573,19 +865,82 @@ def split_raw_transcript(raw_text: str) -> list[str]:
     return split_text_chunks(clean)
 
 
-def build_raw_transcript_toggle(payload: dict[str, Any], segments: list[dict[str, Any]]) -> dict[str, Any]:
-    raw_text = normalize_text(payload.get("raw_text"), normalize_text(payload.get("text")))
-    if not raw_text:
-        raw_text = " ".join(
-            normalize_text(segment.get("text"))
-            for segment in segments
-            if normalize_text(segment.get("text"))
-        )
+def merge_raw_segments(
+    segments: list[dict[str, Any]],
+    *,
+    multi_speaker: bool,
+    max_window_seconds: int = 60,
+) -> list[dict[str, Any]]:
+    if not segments:
+        return []
 
-    chunks = split_raw_transcript(raw_text)
-    children = [paragraph_block(chunk) for chunk in chunks]
+    children: list[dict[str, Any]] = []
+    turn_speaker = ""
+    turn_start = 0
+    turn_fragments: list[str] = []
+
+    def flush_turn() -> None:
+        nonlocal turn_speaker, turn_start, turn_fragments
+        if not turn_fragments:
+            return
+        merged_text = merge_text_fragments(turn_fragments)
+        if merged_text:
+            if multi_speaker:
+                children.append(speaker_paragraph_block(turn_speaker, merged_text))
+            else:
+                children.append(paragraph_block(merged_text))
+        turn_speaker = ""
+        turn_start = 0
+        turn_fragments = []
+
+    for segment in segments:
+        text = normalize_text(segment.get("text"))
+        if not text:
+            continue
+
+        speaker = normalize_text(segment.get("speaker"), "Speaker 1")
+        start_seconds = int(max(0.0, coerce_float(segment.get("start"), 0.0)))
+
+        if not turn_fragments:
+            turn_speaker = speaker
+            turn_start = start_seconds
+            turn_fragments = [text]
+            continue
+
+        speaker_changed = speaker != turn_speaker
+        window_exceeded = (start_seconds - turn_start) >= max_window_seconds
+        if speaker_changed or window_exceeded:
+            flush_turn()
+            turn_speaker = speaker
+            turn_start = start_seconds
+            turn_fragments = [text]
+            continue
+
+        turn_fragments.append(text)
+
+    flush_turn()
+    return children
+
+
+def build_raw_transcript_toggle(payload: dict[str, Any], segments: list[dict[str, Any]]) -> dict[str, Any]:
+    children = merge_raw_segments(
+        segments,
+        multi_speaker=speaker_count(payload, segments) > 1,
+        max_window_seconds=60,
+    )
+
     if not children:
-        children = [paragraph_block("No raw transcript text available.")]
+        raw_text = normalize_text(payload.get("raw_text"), normalize_text(payload.get("text")))
+        if not raw_text:
+            raw_text = " ".join(
+                normalize_text(segment.get("text"))
+                for segment in segments
+                if normalize_text(segment.get("text"))
+            )
+        chunks = split_raw_transcript(raw_text)
+        children = [paragraph_block(chunk) for chunk in chunks]
+        if not children:
+            children = [paragraph_block("No raw transcript text available.")]
 
     return heading_block(1, "Raw Transcript", is_toggleable=True, children=children)
 
@@ -600,9 +955,15 @@ def build_page_blocks(
     metadata = build_page_metadata(transcript_payload, segments)
 
     blocks: list[dict[str, Any]] = [build_metadata_callout(metadata)]
+    blocks.extend(build_tldr(summary_payload))
     blocks.extend(build_summary_blocks(summary_payload))
 
-    transcript_blocks, visual_rows = build_transcript_blocks(merged_payload, image_base_url)
+    transcript_blocks, visual_rows = build_transcript_blocks(
+        merged_payload,
+        image_base_url,
+        chapters=summary_payload.get("chapters", []),
+        speaker_total=metadata["speakers"],
+    )
     blocks.extend(transcript_blocks)
     blocks.append(build_visual_index_toggle(visual_rows))
     blocks.append(build_raw_transcript_toggle(transcript_payload, segments))

@@ -340,6 +340,7 @@ def test_export_notion():
         build_metadata_callout,
         build_page_metadata,
         build_page_properties,
+        build_tldr,
         build_summary_blocks,
         build_transcript_blocks,
         build_visual_index_toggle,
@@ -394,27 +395,74 @@ def test_export_notion():
     else:
         fail("metadata callout", f"got {type(callout)}")
 
+    # build_tldr
+    tldr_blocks = build_tldr(summary)
+    if (
+        isinstance(tldr_blocks, list)
+        and len(tldr_blocks) == 2
+        and tldr_blocks[0].get("type") == "heading_2"
+        and tldr_blocks[1].get("type") == "paragraph"
+    ):
+        ok("build_tldr returns heading + paragraph")
+    else:
+        fail("build_tldr", f"got {len(tldr_blocks) if isinstance(tldr_blocks, list) else type(tldr_blocks)}")
+
     # build_summary_blocks
     summary_blocks = build_summary_blocks(summary)
     if isinstance(summary_blocks, list) and len(summary_blocks) > 0:
         ok(f"build_summary_blocks: {len(summary_blocks)} blocks")
-        has_toggle = any(
-            b.get("type") == "toggle" for b in summary_blocks if isinstance(b, dict)
-        )
-        if has_toggle:
-            ok("summary contains toggle blocks")
+
+        def heading_2_by_text(text: str) -> dict[str, Any] | None:
+            for block in summary_blocks:
+                if not isinstance(block, dict) or block.get("type") != "heading_2":
+                    continue
+                rich = block.get("heading_2", {}).get("rich_text", [])
+                plain = "".join(
+                    rt.get("text", {}).get("content", "")
+                    for rt in rich
+                    if isinstance(rt, dict)
+                )
+                if plain == text:
+                    return block
+            return None
+
+        key_takeaways = heading_2_by_text("🎯 Key Takeaways")
+        chapters_heading = heading_2_by_text("📑 Chapters")
+        shorts_heading = heading_2_by_text("🎬 Shorts & Clip Ideas")
+
+        if key_takeaways and not key_takeaways.get("heading_2", {}).get("is_toggleable"):
+            ok("takeaways are visible (not toggle)")
         else:
-            ok("summary built (no toggles — alternate format)")
+            fail("takeaways visibility", "missing heading or toggleable=True")
+
+        if chapters_heading and not chapters_heading.get("heading_2", {}).get("is_toggleable"):
+            ok("chapters are visible (not toggle)")
+        else:
+            fail("chapters visibility", "missing heading or toggleable=True")
+
+        if shorts_heading and shorts_heading.get("heading_2", {}).get("is_toggleable"):
+            ok("shorts are in a toggle heading")
+        else:
+            fail("shorts toggle", "missing heading or toggleable=False")
     else:
         fail("summary blocks", f"got {len(summary_blocks) if isinstance(summary_blocks, list) else type(summary_blocks)}")
 
     # build_transcript_blocks (takes merged + image_base_url, returns tuple)
-    transcript_result = build_transcript_blocks(merged, "")
+    transcript_result = build_transcript_blocks(
+        merged,
+        "",
+        chapters=summary.get("chapters", []),
+        speaker_total=metadata.get("speakers", 1),
+    )
     if isinstance(transcript_result, tuple) and len(transcript_result) == 2:
         transcript_blocks, visual_rows = transcript_result
         if isinstance(transcript_blocks, list) and len(transcript_blocks) > 0:
             block_types = set(b.get("type") for b in transcript_blocks if isinstance(b, dict))
             ok(f"build_transcript_blocks: {len(transcript_blocks)} blocks, types: {block_types}")
+            if len(transcript_blocks) < 100:
+                ok("transcript blocks merged (<100)")
+            else:
+                fail("transcript block count", f"{len(transcript_blocks)} (expected < 100)")
         else:
             fail("transcript blocks", f"got {len(transcript_blocks) if isinstance(transcript_blocks, list) else 'N/A'}")
         ok(f"visual_rows for index: {len(visual_rows)} entries")
@@ -437,17 +485,41 @@ def test_export_notion():
     else:
         fail("raw transcript toggle", f"got {type(raw_toggle)}")
 
-    # Total block count estimate
-    total = 0
+    # Total block count estimate (including nested heading/table children)
+    all_top_level = []
     for blocks in [
         [callout] if isinstance(callout, dict) else (callout or []),
+        tldr_blocks or [],
         summary_blocks or [],
         transcript_blocks or [],
         [index_block] if isinstance(index_block, dict) else [],
         [raw_toggle] if isinstance(raw_toggle, dict) else [],
     ]:
-        total += len(blocks) if isinstance(blocks, list) else 1
-    ok(f"Total estimated Notion blocks: {total}")
+        if isinstance(blocks, list):
+            all_top_level.extend(blocks)
+
+    def recursive_block_count(blocks: list[dict[str, Any]]) -> int:
+        total = 0
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            total += 1
+            block_type = block.get("type")
+            if block_type in {"heading_1", "heading_2", "heading_3"}:
+                children = block.get(block_type, {}).get("children", [])
+                total += recursive_block_count(children)
+            elif block_type == "table":
+                children = block.get("table", {}).get("children", [])
+                total += recursive_block_count(children)
+        return total
+
+    recursive_total = recursive_block_count(all_top_level)
+    if 80 <= recursive_total <= 120:
+        ok(
+            f"Total estimated Notion blocks: {recursive_total} (flat={len(all_top_level)}, target range)"
+        )
+    else:
+        fail("total block count", f"{recursive_total} (expected ~80-120)")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -818,6 +890,7 @@ def test_e2e_merge_to_export():
     from export_notion import (
         build_metadata_callout,
         build_page_metadata,
+        build_tldr,
         build_summary_blocks,
         build_transcript_blocks,
         normalize_segments as e2e_normalize_segments,
@@ -850,20 +923,30 @@ def test_e2e_merge_to_export():
     e2e_segs = e2e_normalize_segments(transcript)
     e2e_metadata = build_page_metadata(transcript, e2e_segs)
     callout = build_metadata_callout(e2e_metadata)
+    tldr_blocks = build_tldr(norm_summary)
     summary_blocks = build_summary_blocks(norm_summary)
-    transcript_result = build_transcript_blocks(merged_blocks, "")
+    transcript_result = build_transcript_blocks(
+        merged_blocks,
+        "",
+        chapters=norm_summary.get("chapters", []),
+        speaker_total=e2e_metadata.get("speakers", 1),
+    )
     transcript_blocks = transcript_result[0] if isinstance(transcript_result, tuple) else transcript_result
 
-    total = (
+    if isinstance(transcript_blocks, list) and len(transcript_blocks) < 100:
+        ok(f"E2E transcript blocks compacted: {len(transcript_blocks)}")
+    else:
+        fail(
+            "E2E transcript compaction",
+            f"{len(transcript_blocks) if isinstance(transcript_blocks, list) else type(transcript_blocks)}",
+        )
+
+    top_level_total = (
         (1 if isinstance(callout, dict) else len(callout or []))
+        + len(tldr_blocks or [])
         + len(summary_blocks or [])
         + len(transcript_blocks or [])
     )
-
-    if total > 100:
-        ok(f"E2E export blocks: {total} total (callout + summary + transcript)")
-    else:
-        fail("E2E export", f"only {total} blocks")
 
     # Verify no empty blocks  
     all_blocks = []
@@ -871,10 +954,36 @@ def test_e2e_merge_to_export():
         all_blocks.append(callout)
     elif isinstance(callout, list):
         all_blocks.extend(callout)
+    if isinstance(tldr_blocks, list):
+        all_blocks.extend(tldr_blocks)
     if isinstance(summary_blocks, list):
         all_blocks.extend(summary_blocks)
     if isinstance(transcript_blocks, list):
         all_blocks.extend(transcript_blocks)
+
+    def recursive_block_count(blocks: list[dict[str, Any]]) -> int:
+        total = 0
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            total += 1
+            block_type = block.get("type")
+            if block_type in {"heading_1", "heading_2", "heading_3"}:
+                children = block.get(block_type, {}).get("children", [])
+                total += recursive_block_count(children)
+            elif block_type == "table":
+                children = block.get("table", {}).get("children", [])
+                total += recursive_block_count(children)
+        return total
+
+    recursive_total = recursive_block_count(all_blocks)
+    if 80 <= recursive_total <= 120:
+        ok(
+            "E2E export blocks: "
+            f"{recursive_total} total (flat={top_level_total}; callout + TL;DR + summary + transcript)"
+        )
+    else:
+        fail("E2E export", f"{recursive_total} (expected ~80-120)")
 
     empty_blocks = [b for b in all_blocks if not isinstance(b, dict) or not b.get("type")]
     if len(empty_blocks) == 0:
