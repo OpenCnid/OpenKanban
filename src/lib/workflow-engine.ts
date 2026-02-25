@@ -206,12 +206,13 @@ function buildStepPrompt(
 
   // Context management guidance for heavy steps
   if (step.agent_role === 'analyst' || step.agent_role === 'transcriber') {
-    parts.push('\n### ⚠️ Context Management');
-    parts.push('Process each video/item independently to avoid context overflow:');
-    parts.push('1. Process one video at a time');
-    parts.push('2. Save results to disk after each video');
-    parts.push('3. Do NOT accumulate all outputs in conversation history');
-    parts.push('4. If classifying frames, process and save per-video — do not load all frames at once');
+    parts.push('\n### ⚠️ Context Management — CRITICAL');
+    parts.push('Your context window is limited. To avoid overflow:');
+    parts.push('1. Run scripts as subprocesses — do NOT read their source code into context');
+    parts.push('2. Do NOT read large JSON data files (manifests, annotations, transcripts) into context');
+    parts.push('3. Process one video at a time — run the script, check exit code, move on');
+    parts.push('4. Use `exec` to run scripts and only read small outputs (exit code, file existence checks)');
+    parts.push('5. Never use `cat` on data files larger than a few KB');
   }
 
   parts.push('\n---');

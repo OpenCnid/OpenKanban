@@ -50,7 +50,7 @@ const EXAMPLE_TEMPLATES = [
       { name: 'Select Videos', agent_role: 'scout', tools: ['content-scout'], timeoutSeconds: 120 },
       { name: 'Download & Extract', agent_role: 'scout', depends_on: 'Select Videos', timeoutSeconds: 600, maxRetries: 1 },
       { name: 'Transcribe Audio', agent_role: 'transcriber', depends_on: 'Download & Extract', timeoutSeconds: 900, output: 'Transcripts for each video via Whisper API. Process each video independently — do not accumulate all transcripts in context.' },
-      { name: 'Classify Frames', agent_role: 'analyst', depends_on: 'Download & Extract', timeoutSeconds: 900, output: 'Frame annotations for each video. Process ONE video at a time: classify its frames, save results, then move to next. Do not load all frames into context simultaneously.' },
+      { name: 'Classify Frames', agent_role: 'analyst', depends_on: 'Download & Extract', timeoutSeconds: 900, output: 'Frame annotations for each video. IMPORTANT: Run classify_annotate.py as a subprocess for each video — do NOT read frame images, script source code, or JSON data files into your context. Just invoke the script and check the exit code. Process one video at a time: run the script, confirm output file exists, move to next video.' },
       { name: 'Generate Brief', agent_role: 'writer', depends_on: 'Classify Frames', timeoutSeconds: 300 },
       { name: 'Distribute', agent_role: 'distributor', depends_on: 'Generate Brief', destinations: ['notion'] },
     ],
