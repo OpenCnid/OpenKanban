@@ -1,8 +1,6 @@
 # OpenKanban — Agent Entry Point
 
-Workflow orchestration dashboard built on OpenClaw. Hans (non-technical trader)
-triggers, monitors, and approves multi-step AI pipelines from this dashboard.
-Fork of crshdn/mission-control v1.2.0.
+Workflow orchestration dashboard built on OpenClaw. User triggers, monitors, and approves multi-step AI pipelines from this dashboard.
 
 **Core principle:** OpenClaw is the orchestrator. OpenKanban is the visual control surface.
 
@@ -45,7 +43,3 @@ scripts/content-scout/             # Pipeline scripts (Python)
 ```json
 { "gateway.tools.allow": ["sessions_spawn", "sessions_send", "cron"] }
 ```
-
-## Key Distinction
-Hans ≠ Flvcko. FlvckoWatch = Flvcko's trading community (Cnid is dev-for-hire).
-OpenKanban + Content Scout = built for Hans, a different client.

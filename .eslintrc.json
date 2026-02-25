@@ -2,6 +2,22 @@
   "extends": ["next/core-web-vitals", "next/typescript"],
   "rules": {
     "@typescript-eslint/no-unused-vars": "off",
-    "@typescript-eslint/no-explicit-any": "off"
-  }
+    "@typescript-eslint/no-explicit-any": "off",
+    "no-console-log": "warn",
+    "no-restricted-imports": ["error", {
+      "patterns": [{
+        "group": ["**/orchestration*", "**/auto-dispatch*"],
+        "message": "Use the gateway client (src/lib/openclaw/client.ts) for all orchestration. OpenClaw is the orchestrator, not OpenKanban. See docs/architecture.md."
+      }]
+    }]
+  },
+  "overrides": [
+    {
+      "files": ["src/lib/openclaw/**", "src/app/api/**"],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["eslint-rules/**", "scripts/**", "content-vault/**", "tmp/**", "pipeline-outputs/**"]
 }
