@@ -39,6 +39,13 @@ scripts/content-scout/             # Pipeline scripts (Python)
 | Content pipeline (Scout + Transcript) | `docs/content-pipeline.md` |
 | Feature specs | `docs/specs/` |
 
+## Lint
+```bash
+npx eslint src/ --rulesdir eslint-rules/rules    # or: npm run lint
+```
+Custom rules: `no-console-log` (warn) via `--rulesdir`.
+Built-in: `no-restricted-imports` blocks direct orchestration outside gateway client.
+
 ## Gateway Config Required
 ```json
 { "gateway.tools.allow": ["sessions_spawn", "sessions_send", "cron"] }
