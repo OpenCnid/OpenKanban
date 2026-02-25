@@ -159,7 +159,7 @@ def heading_block(
         },
     }
     if children:
-        payload["children"] = children
+        payload[heading_type]["children"] = children
     return payload
 
 
