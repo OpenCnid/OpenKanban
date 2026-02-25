@@ -488,6 +488,8 @@ export function PipelineView({ workspaceId }: PipelineViewProps) {
             name: t.name,
             icon: t.icon || '⚡',
             description: t.description,
+            trigger_type: t.trigger_type,
+            steps: t.steps,
           }))}
         />
       )}
